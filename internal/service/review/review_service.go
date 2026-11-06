@@ -288,6 +288,9 @@ func (cs *ReviewService) updateObjectStatus(ctx context.Context, review *entity.
 			return err
 		}
 		if isApprove {
+			if err := plugin.NotifyQuestionPublished(ctx, questionInfo.ID); err != nil {
+				log.Errorf("question publication plugin failed for %s: %v", questionInfo.ID, err)
+			}
 			tags, err := cs.tagCommon.GetObjectEntityTag(ctx, questionInfo.ID)
 			if err != nil {
 				log.Errorf("get question tags failed, err: %v", err)

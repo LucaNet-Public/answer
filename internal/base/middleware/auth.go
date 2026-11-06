@@ -41,7 +41,10 @@ import (
 
 var ctxUUIDKey = "ctxUuidKey"
 
-func init() { plugin.CurrentUserID = GetLoginUserIDFromContext }
+func init() {
+	plugin.CurrentUserID = GetLoginUserIDFromContext
+	plugin.CurrentUserIsStaff = GetUserIsAdminModerator
+}
 
 // AuthUserMiddleware auth user middleware
 type AuthUserMiddleware struct {

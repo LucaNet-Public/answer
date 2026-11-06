@@ -24,8 +24,18 @@ import { useTranslation } from 'react-i18next';
 
 import classNames from 'classnames';
 
+import { PluginType } from '@/utils/pluginKit';
+import request from '@/utils/request';
+import { REACT_BASE_PATH } from '@/router/alias';
 import { usePageTags } from '@/hooks';
-import { Tag, TagSelector, FormatTime, Modal, htmlRender } from '@/components';
+import {
+  Tag,
+  TagSelector,
+  FormatTime,
+  Modal,
+  htmlRender,
+  PluginRender,
+} from '@/components';
 import {
   useTagInfo,
   useQuerySynonymsTags,
@@ -232,6 +242,15 @@ const TagIntroduction = () => {
             className="content text-break fmt"
             dangerouslySetInnerHTML={{ __html: tagInfo?.parsed_text }}
           />
+          {tagInfo.status !== 'deleted' && (
+            <PluginRender
+              key={tagInfo.tag_id}
+              type={PluginType.TagWiki}
+              tagID={tagInfo.tag_id}
+              request={request}
+              baseUrl={REACT_BASE_PATH}
+            />
+          )}
           <div className="mt-4">
             {tagInfo?.member_actions.map((action, index) => {
               return (

@@ -51,6 +51,9 @@ func NewFollowService(
 		tagRepo:          tagRepo,
 	}
 	plugin.LookupTag = tagRepo.GetTagBySlugName
+	plugin.LookupTagByID = func(ctx context.Context, id string) (*plugin.Tag, bool, error) {
+		return tagRepo.GetTagByID(ctx, id, false)
+	}
 	plugin.FollowTag = func(ctx context.Context, objectID, userID string) error {
 		_, err := fs.Follow(ctx, &schema.FollowDTO{ObjectID: objectID, UserID: userID})
 		return err

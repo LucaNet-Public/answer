@@ -45,6 +45,21 @@ type userRepo struct {
 // NewUserRepo new repository
 func NewUserRepo(data *data.Data) usercommon.UserRepo {
 	repo := &userRepo{data: data}
+	plugin.LookupMembers = func(ctx context.Context, ids []string) ([]plugin.MemberSummary, error) {
+		users, err := repo.BatchGetByID(ctx, ids)
+		return availableMembers(users), err
+	}
+	plugin.SearchMembers = func(ctx context.Context, query string) ([]plugin.MemberSummary, error) {
+		users := []*entity.User{}
+		prefix := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(strings.ToLower(query)) + "%"
+		err := repo.data.DB.Context(ctx).Where("status = ? AND mail_status = ?", entity.UserStatusAvailable, entity.EmailStatusAvailable).
+			And("(LOWER(username) LIKE ? ESCAPE '!' OR LOWER(display_name) LIKE ? ESCAPE '!')", prefix, prefix).
+			OrderBy("username ASC").Limit(20).Find(&users)
+		if err == nil {
+			tryToDecorateUserListFromUserCenter(ctx, repo.data, users)
+		}
+		return availableMembers(users), err
+	}
 	plugin.UserAvailable = func(ctx context.Context, id string) (bool, error) {
 		u, exists, err := repo.GetByUserID(ctx, id)
 		return err == nil && exists && u.Status == entity.UserStatusAvailable &&
@@ -408,4 +423,14 @@ func (ur *userRepo) IsAvatarFileUsed(ctx context.Context, filePath string) (bool
 	}
 
 	return count > 0, nil
+}
+
+func availableMembers(users []*entity.User) []plugin.MemberSummary {
+	result := make([]plugin.MemberSummary, 0, len(users))
+	for _, user := range users {
+		if user.Status == entity.UserStatusAvailable && user.MailStatus == entity.EmailStatusAvailable {
+			result = append(result, plugin.MemberSummary{ID: user.ID, Username: user.Username, DisplayName: user.DisplayName})
+		}
+	}
+	return result
 }

@@ -54,6 +54,9 @@ var StatusManager = statusManager{
 // Register registers a plugin
 func Register(p Base) {
 	registerBase(p)
+	if provider, ok := p.(QuestionPublication); ok {
+		registerQuestionPublication(provider)
+	}
 
 	if hook, ok := p.(NewUser); ok {
 		registerNewUser(hook)

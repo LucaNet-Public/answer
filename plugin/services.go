@@ -31,6 +31,18 @@ type Tag = entity.Tag
 
 const TagStatusAvailable = entity.TagStatusAvailable
 
+// MemberSummary exposes public profile fields only.
+type MemberSummary struct {
+	ID          string `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+}
+
+var CurrentUserIsStaff func(*gin.Context) bool
+var LookupTagByID func(context.Context, string) (*Tag, bool, error)
+var LookupMembers func(context.Context, []string) ([]MemberSummary, error)
+var SearchMembers func(context.Context, string) ([]MemberSummary, error)
+
 // Core binds these capabilities during application initialization.
 var CurrentUserID func(*gin.Context) string
 var UserIDByEmail func(context.Context, string) (string, bool, error)

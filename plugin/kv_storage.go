@@ -350,3 +350,8 @@ func (kv *KVOperator) CompareAndSwap(ctx context.Context, params KVParams, expec
 	kv.cleanCache(ctx, params)
 	return affected == 1, err
 }
+
+// Database exposes the application database to trusted, compiled-in plugins.
+// Plugins own their transaction and must not close the engine. This allows
+// plugin state and application records to be updated atomically.
+func (kv *KVOperator) Database() *xorm.Engine { return kv.data.DB }

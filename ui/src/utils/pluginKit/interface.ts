@@ -33,6 +33,7 @@ export enum PluginType {
   Render = 'render',
   Sidebar = 'sidebar',
   Layout = 'layout',
+  TagWiki = 'tag_wiki',
 }
 
 export interface ShareReplacementProps {

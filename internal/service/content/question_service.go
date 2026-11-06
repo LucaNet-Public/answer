@@ -124,7 +124,7 @@ func NewQuestionService(
 	reviewRepo review.ReviewRepo,
 	vectorSyncService vector_sync.Service,
 ) *QuestionService {
-	return &QuestionService{
+	service := &QuestionService{
 		activityRepo:                     activityRepo,
 		questionRepo:                     questionRepo,
 		answerRepo:                       answerRepo,
@@ -150,6 +150,8 @@ func NewQuestionService(
 		reviewRepo:                       reviewRepo,
 		vectorSyncService:                vectorSyncService,
 	}
+	plugin.NotifyQuestionInvitees = service.notificationInviteUser
+	return service
 }
 
 func (qs *QuestionService) CloseQuestion(ctx context.Context, req *schema.CloseQuestionReq) error {
@@ -449,6 +451,9 @@ func (qs *QuestionService) AddQuestion(ctx context.Context, req *schema.Question
 	})
 
 	if question.Status == entity.QuestionStatusAvailable {
+		if err := plugin.NotifyQuestionPublished(ctx, question.ID); err != nil {
+			log.Errorf("question publication plugin failed for %s: %v", question.ID, err)
+		}
 		newTags, newTagsErr := qs.tagCommon.GetTagListByNames(ctx, tagNameList)
 		if newTagsErr != nil {
 			log.Error("get question newTags error %v", newTagsErr)
