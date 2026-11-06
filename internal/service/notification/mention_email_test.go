@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 package notification
 
 import (
@@ -73,7 +92,7 @@ func mentionSMTP(t *testing.T) (int, <-chan string) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 		smtp := textproto.NewConn(conn)
 		_ = smtp.PrintfLine("220 test SMTP")
@@ -192,7 +211,7 @@ func TestMentionEmailDeliveryHonoursSavedPreferences(t *testing.T) {
 				if !tc.mention && strings.Contains(subject, "mentioned you") {
 					t.Fatalf("ordinary comment used mention subject: %q", subject)
 				}
-				body := io.Reader(msg.Body)
+				var body io.Reader = msg.Body
 				if msg.Header.Get("Content-Transfer-Encoding") == "quoted-printable" {
 					body = quotedprintable.NewReader(body)
 				}
