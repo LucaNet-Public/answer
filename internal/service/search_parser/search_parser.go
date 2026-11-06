@@ -50,8 +50,14 @@ func NewSearchParser(tagCommonService *tag_common.TagCommonService, userCommon *
 func (sp *SearchParser) ParseStructure(ctx context.Context, dto *schema.SearchDTO) (cond *schema.SearchCondition) {
 	cond = &schema.SearchCondition{}
 	var (
-		query      = dto.Query
-		limitWords = 5
+		query = dto.Query
+		// Upstream keeps only the first five words of a query. That suits a
+		// LIKE-per-word search, where every extra word widens the result set,
+		// but a semantic search plugin embeds the query as a sentence, and the
+		// words dropped are usually the ones that carry its meaning. The
+		// request length cap below already bounds the input, so this only
+		// needs to stop pathological word counts.
+		limitWords = 100
 	)
 
 	// match tags

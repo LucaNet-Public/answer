@@ -29,7 +29,11 @@ import (
 )
 
 type SearchDTO struct {
-	Query       string `validate:"required,gte=1,lte=60" form:"q"`
+	// Upstream allows sixty characters, enough for keywords and too short for
+	// a question asked in a sentence, which is what a semantic search plugin
+	// wants. Raised to two hundred; the word limit in the parser is raised
+	// with it.
+	Query       string `validate:"required,gte=1,lte=200" form:"q"`
 	Page        int    `validate:"omitempty,min=1" form:"page,default=1"`
 	Size        int    `validate:"omitempty,min=1,max=50" form:"size,default=30"`
 	Order       string `validate:"required,oneof=newest active score relevance" form:"order,default=relevance" enums:"newest,active,score,relevance"`
