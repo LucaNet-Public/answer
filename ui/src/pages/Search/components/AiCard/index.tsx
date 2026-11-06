@@ -33,6 +33,11 @@ const Index = () => {
   const { t } = useTranslation('translation', { keyPrefix: 'ai_assistant' });
   const { ai_enabled } = aiControlStore((state) => state);
   const [searchParams] = useSearchParams();
+  const q = searchParams.get('q') || '';
+  // The query this card's conversation belongs to. The search page keeps one
+  // card mounted across searches, so without this a card can outlive the
+  // question it answered.
+  const [askedFor, setAskedFor] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isGenerate, setIsGenerate] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
@@ -129,13 +134,31 @@ const Index = () => {
   };
 
   useEffect(() => {
-    const q = searchParams.get('q') || '';
-    if (ai_enabled && q) {
+    // A query made only of filters -- [tag], user:, score:, answers:, is: --
+    // is search syntax, not a question. Sending it to the model costs a
+    // completion, and a Developer Portal lookup with it, for an answer that
+    // cannot mean anything. Answer's own tag pages take one tag, so a search
+    // is the only way to ask for posts carrying any of several, and the Teams
+    // tab opens exactly that: one such search per channel visit.
+    const asked = q
+      .replace(/\[[^\]]*\]/g, ' ')
+      .replace(/\w+:\S+/g, ' ')
+      .trim();
+    if (ai_enabled && asked) {
+      setAskedFor(q);
       handleSubmit(q);
+      return;
     }
+    setAskedFor('');
   }, [searchParams]);
 
   if (!ai_enabled) {
+    return null;
+  }
+  // Nothing was asked about this search. Hiding on the conversation being
+  // empty would not do: it still holds the previous question's answer, and a
+  // reply still streaming in would refill it.
+  if (askedFor !== q) {
     return null;
   }
   return (
