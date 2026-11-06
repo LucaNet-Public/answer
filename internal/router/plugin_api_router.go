@@ -79,6 +79,7 @@ func (pr *PluginAPIRouter) RegisterUnAuthConnectorRouter(r *gin.RouterGroup) {
 func (pr *PluginAPIRouter) RegisterAuthUserConnectorRouter(r *gin.RouterGroup) {
 	connectorController := pr.connectorController
 	r.GET("/connector/user/info", connectorController.ConnectorsUserInfo)
+	r.POST("/connector/entra-users", connectorController.ResolveEntraUsers)
 	r.DELETE("/connector/user/unbinding", connectorController.ExternalLoginUnbinding)
 
 	r.GET("/user-center/user/settings", pr.userCenterController.UserCenterUserSettings)

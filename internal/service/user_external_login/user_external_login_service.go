@@ -150,6 +150,7 @@ func (us *UserExternalLoginService) ExternalLogin(
 			return nil, err
 		}
 		if exist && oldUserInfo.Status != entity.UserStatusDeleted {
+			us.recordEntraIdentity(ctx, oldUserInfo.ID, externalUserInfo)
 			if err := us.userRepo.UpdateLastLoginDate(ctx, oldUserInfo.ID); err != nil {
 				log.Errorf("update user last login date failed: %v", err)
 			}
@@ -305,6 +306,9 @@ func (us *UserExternalLoginService) bindOldUser(ctx context.Context,
 			MetaInfo:   externalUserInfo.MetaInfo,
 		}
 		err = us.userExternalLoginRepo.AddUserExternalLogin(ctx, newExternalUserInfo)
+	}
+	if err == nil {
+		us.recordEntraIdentity(ctx, oldUserInfo.ID, externalUserInfo)
 	}
 	return err
 }
