@@ -20,6 +20,7 @@
 package content
 
 import (
+	"sort"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -1407,6 +1408,17 @@ func (qs *QuestionService) GetQuestionsByTitle(ctx context.Context, title string
 		if questionErr != nil {
 			return resp, questionErr
 		}
+		// FindByID returns rows in whatever order the database likes, which
+		// throws away the ranking the search plugin produced; the ask page
+		// then shows the first few of an unordered ten. Restore the plugin's
+		// order.
+		position := make(map[string]int, len(questionIDs))
+		for i, id := range questionIDs {
+			position[id] = i
+		}
+		sort.SliceStable(questions, func(i, j int) bool {
+			return position[questions[i].ID] < position[questions[j].ID]
+		})
 	} else {
 		var questionErr error
 		questions, questionErr = qs.questionRepo.GetQuestionsByTitle(ctx, title, 10)
