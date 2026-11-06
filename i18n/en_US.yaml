@@ -498,6 +498,9 @@ backend:
         other: "[{{.SiteName}}] {{.DisplayName}} invited you to answer"
       body:
         other: "<a href='{{.InviteUrl}}'>{{.QuestionTitle}}</a><br><br>\n\n{{.DisplayName}}:<br>\n<blockquote>I think you may know the answer.</blockquote><br>\n<a href='{{.InviteUrl}}'>View it on {{.SiteName}}</a><br><br>\n\n--<br>\nNote: This is an automatic system email, please do not reply to this message as your response will not be seen.<br><br>\n\n<small><a href='{{.UnsubscribeUrl}}'>Unsubscribe</a></small>"
+    mention:
+      title:
+        other: "[{{.SiteName}}] {{.DisplayName}} mentioned you in a comment"
     new_comment:
       title:
         other: "[{{.SiteName}}] {{.DisplayName}} commented on your post"

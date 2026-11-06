@@ -315,7 +315,11 @@ func (es *EmailService) NewCommentTemplate(ctx context.Context, raw *schema.NewC
 		siteInfo.SiteUrl, raw.QuestionID, raw.QuestionTitle, raw.AnswerID, raw.CommentID)
 
 	lang := handler.GetLangByCtx(ctx)
-	title = translator.TrWithData(lang, constant.EmailTplKeyNewCommentTitle, templateData)
+	titleKey := constant.EmailTplKeyNewCommentTitle
+	if raw.IsMention {
+		titleKey = constant.EmailTplKeyMentionTitle
+	}
+	title = translator.TrWithData(lang, titleKey, templateData)
 	body = translator.TrWithData(lang, constant.EmailTplKeyNewCommentBody, &schema.NewCommentTemplateData{
 		SiteName:       escapeEmailHTMLText(templateData.SiteName),
 		DisplayName:    escapeEmailHTMLText(templateData.DisplayName),

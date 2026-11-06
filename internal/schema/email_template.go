@@ -109,6 +109,7 @@ type NewInviteAnswerTemplateData struct {
 }
 
 type NewCommentTemplateRawData struct {
+	IsMention              bool
 	CommentUserDisplayName string
 	QuestionTitle          string
 	QuestionID             string

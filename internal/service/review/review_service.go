@@ -447,12 +447,12 @@ func (cs *ReviewService) notificationCommentOnTheQuestion(ctx context.Context, c
 	}
 	objInfo.ObjectID = uid.DeShortID(objInfo.ObjectID)
 	objInfo.QuestionID = uid.DeShortID(objInfo.QuestionID)
-	objInfo.AnswerID = uid.DeShortID(objInfo.AnswerID)
+	if len(objInfo.AnswerID) > 0 {
+		objInfo.AnswerID = uid.DeShortID(objInfo.AnswerID)
+	}
 
-	// The priority of the notification
-	// 1. reply to user
-	// 2. comment mention to user
-	// 3. answer or question was commented
+	// Notify replies and explicit mentions once per recipient.
+	// Notify the post author only when neither path applies.
 	alreadyNotifiedUserID := make(map[string]bool)
 
 	// get reply user info
@@ -466,16 +466,17 @@ func (cs *ReviewService) notificationCommentOnTheQuestion(ctx context.Context, c
 		cs.notificationCommentReply(ctx, replyUser.ID, comment.ID, comment.UserID,
 			objInfo.QuestionID, objInfo.Title, htmltext.FetchExcerpt(comment.ParsedText, "...", 240))
 		alreadyNotifiedUserID[replyUser.ID] = true
-		return
 	}
 
 	mentionUsernameList := comment.GetMentionUsernameList()
 	if len(mentionUsernameList) > 0 {
-		alreadyNotifiedUserIDs := cs.notificationMention(
-			ctx, mentionUsernameList, comment.ID, comment.UserID, alreadyNotifiedUserID)
-		for _, userID := range alreadyNotifiedUserIDs {
-			alreadyNotifiedUserID[userID] = true
-		}
+		cs.notificationMention(
+			ctx, mentionUsernameList, comment.ID, comment.UserID, alreadyNotifiedUserID,
+			objInfo, htmltext.FetchExcerpt(comment.ParsedText, "...", 240))
+		return
+	}
+
+	if len(alreadyNotifiedUserID) > 0 {
 		return
 	}
 
@@ -532,14 +533,21 @@ func (cs *ReviewService) notificationCommentReply(ctx context.Context, replyUser
 
 func (cs *ReviewService) notificationMention(
 	ctx context.Context, mentionUsernameList []string, commentID, commentUserID string,
-	alreadyNotifiedUserID map[string]bool) (alreadyNotifiedUserIDs []string) {
+	alreadyNotifiedUserID map[string]bool, objInfo *schema.SimpleObjectInfo, commentSummary string) {
+	commentUser, authorExists, authorErr := cs.userCommon.GetUserBasicInfoByID(ctx, commentUserID)
+	canSendEmail := authorErr == nil && authorExists && commentUser != nil && commentUser.DisplayName != ""
+	if authorErr != nil {
+		log.Errorf("get comment author %s for mention email: %v", commentUserID, authorErr)
+	} else if !canSendEmail {
+		log.Warnf("comment author %s unavailable; skipping mention email", commentUserID)
+	}
 	for _, username := range mentionUsernameList {
-		userInfo, exist, err := cs.userCommon.GetUserBasicInfoByUserName(ctx, username)
+		userInfo, exist, err := cs.userRepo.GetByUsername(ctx, username)
 		if err != nil {
 			log.Error(err)
 			continue
 		}
-		if exist && !alreadyNotifiedUserID[userInfo.ID] {
+		if exist && userInfo.ID != commentUserID && !alreadyNotifiedUserID[userInfo.ID] {
 			msg := &schema.NotificationMsg{
 				ReceiverUserID: userInfo.ID,
 				TriggerUserID:  commentUserID,
@@ -549,10 +557,34 @@ func (cs *ReviewService) notificationMention(
 			msg.ObjectType = constant.CommentObjectType
 			msg.NotificationAction = constant.NotificationMentionYou
 			cs.notificationQueueService.Send(ctx, msg)
-			alreadyNotifiedUserIDs = append(alreadyNotifiedUserIDs, userInfo.ID)
+			alreadyNotifiedUserID[userInfo.ID] = true
+
+			// Mentions use the same inbox email preference as comment replies.
+			// Do not email an excerpt of a post the recipient cannot view.
+			if !canSendEmail {
+				continue
+			}
+			if err := objInfo.CheckVisibility(userInfo.ID, false); err != nil {
+				continue
+			}
+			rawData := &schema.NewCommentTemplateRawData{
+				CommentUserDisplayName: commentUser.DisplayName,
+				IsMention:              true,
+				QuestionTitle:          objInfo.Title,
+				QuestionID:             objInfo.QuestionID,
+				AnswerID:               objInfo.AnswerID,
+				CommentID:              commentID,
+				CommentSummary:         commentSummary,
+				UnsubscribeCode:        token.GenerateToken(),
+			}
+			cs.externalNotificationQueueService.Send(ctx, &schema.ExternalNotificationMsg{
+				ReceiverUserID:            userInfo.ID,
+				ReceiverEmail:             userInfo.EMail,
+				ReceiverLang:              userInfo.Language,
+				NewCommentTemplateRawData: rawData,
+			})
 		}
 	}
-	return alreadyNotifiedUserIDs
 }
 
 func (cs *ReviewService) notificationQuestionComment(ctx context.Context, questionUserID,

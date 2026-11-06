@@ -28,6 +28,7 @@ const (
 
 	EmailTplKeyNewCommentTitle = "email_tpl.new_comment.title"
 	EmailTplKeyNewCommentBody  = "email_tpl.new_comment.body"
+	EmailTplKeyMentionTitle    = "email_tpl.mention.title"
 
 	EmailTplKeyPassResetTitle = "email_tpl.pass_reset.title"
 	EmailTplKeyPassResetBody  = "email_tpl.pass_reset.body"
