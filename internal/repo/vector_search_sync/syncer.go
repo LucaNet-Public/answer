@@ -37,6 +37,18 @@ func NewPluginSyncer(data *data.Data) plugin.VectorSearchSyncer {
 	return &PluginSyncer{data: data}
 }
 
+// Content that is deleted or awaiting review must never reach the vector index.
+// Retrieval is not access control: anything embedded here can be quoted back by
+// the AI assistant, with a link, long after it was removed from the site.
+//
+// Closed questions stay indexed. Closing ends new answers; it does not retract
+// what is already there.
+var (
+	hiddenQuestionStatuses = []any{entity.QuestionStatusDeleted, entity.QuestionStatusPending}
+	hiddenAnswerStatuses   = []any{entity.AnswerStatusDeleted, entity.AnswerStatusPending}
+	hiddenCommentStatuses  = []any{entity.CommentStatusDeleted, entity.CommentStatusPending}
+)
+
 // PluginSyncer implements plugin.VectorSearchSyncer.
 // It aggregates question/answer text with comments for vector embedding.
 type PluginSyncer struct {
@@ -49,7 +61,8 @@ func (p *PluginSyncer) GetQuestionsPage(ctx context.Context, page, pageSize int)
 	[]*plugin.VectorSearchContent, error) {
 	questions := make([]*entity.Question, 0)
 	startNum := (page - 1) * pageSize
-	err := p.data.DB.Context(ctx).Limit(pageSize, startNum).Find(&questions)
+	err := p.data.DB.Context(ctx).NotIn("status", hiddenQuestionStatuses...).
+		Limit(pageSize, startNum).Find(&questions)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +75,8 @@ func (p *PluginSyncer) GetAnswersPage(ctx context.Context, page, pageSize int) (
 	[]*plugin.VectorSearchContent, error) {
 	answers := make([]*entity.Answer, 0)
 	startNum := (page - 1) * pageSize
-	err := p.data.DB.Context(ctx).Limit(pageSize, startNum).Find(&answers)
+	err := p.data.DB.Context(ctx).NotIn("status", hiddenAnswerStatuses...).
+		Limit(pageSize, startNum).Find(&answers)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +97,8 @@ func (p *PluginSyncer) buildQuestionContents(ctx context.Context, questions []*e
 
 		// Get answers for this question
 		answers := make([]*entity.Answer, 0)
-		err := p.data.DB.Context(ctx).Where("question_id = ?", q.ID).Find(&answers)
+		err := p.data.DB.Context(ctx).Where("question_id = ?", q.ID).
+			NotIn("status", hiddenAnswerStatuses...).Find(&answers)
 		if err != nil {
 			log.Warnf("get answers for question %s failed: %v", q.ID, err)
 		} else {
@@ -96,6 +111,7 @@ func (p *PluginSyncer) buildQuestionContents(ctx context.Context, questions []*e
 				// Get comments on this answer
 				answerComments := make([]*entity.Comment, 0)
 				err := p.data.DB.Context(ctx).Where("object_id = ?", a.ID).
+					NotIn("status", hiddenCommentStatuses...).
 					OrderBy("created_at ASC").Limit(50).Find(&answerComments)
 				if err != nil {
 					log.Warnf("get comments for answer %s failed: %v", a.ID, err)
@@ -114,6 +130,7 @@ func (p *PluginSyncer) buildQuestionContents(ctx context.Context, questions []*e
 		// Get comments on the question
 		questionComments := make([]*entity.Comment, 0)
 		err = p.data.DB.Context(ctx).Where("object_id = ?", q.ID).
+			NotIn("status", hiddenCommentStatuses...).
 			OrderBy("created_at ASC").Limit(50).Find(&questionComments)
 		if err != nil {
 			log.Warnf("get comments for question %s failed: %v", q.ID, err)
@@ -145,7 +162,8 @@ func (p *PluginSyncer) buildAnswerContents(ctx context.Context, answers []*entit
 	for _, a := range answers {
 		// Get parent question for title
 		question := &entity.Question{}
-		exist, err := p.data.DB.Context(ctx).Where("id = ?", a.QuestionID).Get(question)
+		exist, err := p.data.DB.Context(ctx).Where("id = ?", a.QuestionID).
+			NotIn("status", hiddenQuestionStatuses...).Get(question)
 		if err != nil {
 			log.Errorf("get question %s failed: %v", a.QuestionID, err)
 			continue
@@ -170,6 +188,7 @@ func (p *PluginSyncer) buildAnswerContents(ctx context.Context, answers []*entit
 		// Get comments on this answer
 		answerComments := make([]*entity.Comment, 0)
 		err = p.data.DB.Context(ctx).Where("object_id = ?", a.ID).
+			NotIn("status", hiddenCommentStatuses...).
 			OrderBy("created_at ASC").Limit(50).Find(&answerComments)
 		if err != nil {
 			log.Warnf("get comments for answer %s failed: %v", a.ID, err)
@@ -199,7 +218,8 @@ func (p *PluginSyncer) buildAnswerContents(ctx context.Context, answers []*entit
 // aggregation semantics as bulk vector sync.
 func BuildQuestionContentByID(ctx context.Context, data *data.Data, questionID string) (*plugin.VectorSearchContent, error) {
 	question := &entity.Question{}
-	exist, err := data.DB.Context(ctx).Where("id = ?", uid.DeShortID(questionID)).Get(question)
+	exist, err := data.DB.Context(ctx).Where("id = ?", uid.DeShortID(questionID)).
+		NotIn("status", hiddenQuestionStatuses...).Get(question)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +241,8 @@ func BuildQuestionContentByID(ctx context.Context, data *data.Data, questionID s
 // aggregation semantics as bulk vector sync.
 func BuildAnswerContentByID(ctx context.Context, data *data.Data, answerID string) (*plugin.VectorSearchContent, error) {
 	answer := &entity.Answer{}
-	exist, err := data.DB.Context(ctx).Where("id = ?", uid.DeShortID(answerID)).Get(answer)
+	exist, err := data.DB.Context(ctx).Where("id = ?", uid.DeShortID(answerID)).
+		NotIn("status", hiddenAnswerStatuses...).Get(answer)
 	if err != nil {
 		return nil, err
 	}
