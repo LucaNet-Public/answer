@@ -52,20 +52,24 @@ func (s *SearchDTO) Check() (errField []*validator.FormErrorField, err error) {
 }
 
 func ReplaceSearchContent(content string) (string, []string) {
-	// Define the regular expressions for key:value pairs and [tag]
+	// Upstream protects a bracketed tag only when it matches `\[\w+\]`, so a
+	// slug with a hyphen or a colon, the norm for tags such as `dev-aio` or
+	// `tools:terraform`, is not protected: the hyphen is replaced by a space
+	// below and the parser then looks up a tag that does not exist, and the
+	// colon form is taken by the key:value regex as `tools:terraform]`, moved
+	// to the front, and leaves its bracket behind. Either way the tag filter
+	// is silently dropped. A tag is anything between brackets, and tags are
+	// taken out before key:value pairs so the two cannot compete.
+	tagRegex := regexp.MustCompile(`\[[^\[\]]+\]`)
 	keyValueRegex := regexp.MustCompile(`\w+:\S+`)
-	tagRegex := regexp.MustCompile(`\[\w+\]`)
 	// Define the pattern for characters to replace
 	replaceCharsPattern := regexp.MustCompile(`[+#.<>\-_()*]`)
 
-	// Extract key:value pairs
-	keyValues := keyValueRegex.FindAllString(content, -1)
-	// Extract [tag]
+	// Extract [tag], then key:value pairs from what remains
 	tags := tagRegex.FindAllString(content, -1)
-
-	// Replace key:value pairs and [tag] with empty string
-	contentWithoutPatterns := keyValueRegex.ReplaceAllString(content, "")
-	contentWithoutPatterns = tagRegex.ReplaceAllString(contentWithoutPatterns, "")
+	contentWithoutPatterns := tagRegex.ReplaceAllString(content, "")
+	keyValues := keyValueRegex.FindAllString(contentWithoutPatterns, -1)
+	contentWithoutPatterns = keyValueRegex.ReplaceAllString(contentWithoutPatterns, "")
 
 	// Replace characters with pattern [+#.<>_()*] with space
 	replacedContent := replaceCharsPattern.ReplaceAllString(contentWithoutPatterns, " ")
