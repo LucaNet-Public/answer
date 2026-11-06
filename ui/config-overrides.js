@@ -24,6 +24,7 @@ const {
   addWebpackPlugin,
 } = require("customize-cra");
 const webpack = require('webpack');
+const { sentryWebpackPlugin } = require('@sentry/webpack-plugin');
 
 const path = require("path");
 const i18nPath = path.resolve(__dirname, "../i18n");
@@ -46,6 +47,30 @@ module.exports = {
         Buffer: ['buffer', 'Buffer'],
       })
     )(config);
+
+    // Lucanet: injects a debug ID into each bundle and its source map, and
+    // uploads the maps to answer-frontend, so Sentry can show browser errors
+    // against the source. Only a production build with an upload token does
+    // either; without one -- a local build -- the bundles are exactly as
+    // before. See src/utils/sentry.ts.
+    if (env === 'production' && process.env.SENTRY_AUTH_TOKEN) {
+      addWebpackPlugin(
+        sentryWebpackPlugin({
+          url: process.env.SENTRY_URL,
+          org: process.env.SENTRY_ORG,
+          project: process.env.SENTRY_PROJECT,
+          authToken: process.env.SENTRY_AUTH_TOKEN,
+          release: { create: false, inject: false },
+          // answer build embeds ui/build into the binary, and the site serves
+          // whatever is there, so a map left behind publishes the source of
+          // every patch in docker/patches. Sentry has them; the site does not
+          // need them. A build without a token never gets here and keeps its
+          // maps, which is what a local build wants.
+          sourcemaps: { filesToDeleteAfterUpload: ['./build/**/*.map'] },
+          telemetry: false,
+        })
+      )(config);
+    }
 
     setWebpackOptimizationSplitChunks({
       maxInitialRequests: 20,

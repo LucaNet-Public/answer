@@ -21,9 +21,14 @@ import React from 'react';
 
 import ReactDOM from 'react-dom/client';
 
+import { startSentry } from './utils/sentry';
 import App from './App';
 
 import './index.scss';
+
+// Lucanet: before React renders, so an error while the app starts is reported
+// too. See utils/sentry.ts.
+startSentry();
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement,
