@@ -28,7 +28,9 @@ import (
 	"maps"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/apache/answer/internal/base/constant"
@@ -194,8 +196,199 @@ type responseFunctionCall struct {
 // aiReasoningEffort is the reasoning effort sent with every request, from
 // ANSWER_AI_REASONING_EFFORT. Empty by default, so the field is omitted and the
 // provider's own default applies.
+// aiMaxRounds is how many model round-trips one question may take, from
+// ANSWER_AI_MAX_ROUNDS. A question that needs tools spends a round per tool
+// call, and running out of rounds ends the conversation with no answer at all,
+// so this is raised well above the upstream default of 10. Tunable without a
+// rebuild because the right value depends on how many tools are configured.
+func aiMaxRounds() int {
+	const defaultMaxRounds = 20
+
+	raw := os.Getenv("ANSWER_AI_MAX_ROUNDS")
+	if raw == "" {
+		return defaultMaxRounds
+	}
+
+	rounds, err := strconv.Atoi(raw)
+	if err != nil || rounds < 1 {
+		log.Warnf("ignoring invalid ANSWER_AI_MAX_ROUNDS %q; using %d", raw, defaultMaxRounds)
+		return defaultMaxRounds
+	}
+
+	return rounds
+}
+
+// streamKeepaliveInterval is how often a keepalive is written while a
+// conversation runs. CloudFront's origin read timeout (60 seconds) and the
+// load balancer's idle timeout (65 seconds) both measure the gap between
+// bytes, so this only has to stay well inside the shorter of the two.
+const streamKeepaliveInterval = 15 * time.Second
+
+// aiRoundTimeout bounds one model call. A stream the provider never finishes
+// would otherwise hold the handler, and the connection, until the process
+// exits; one was observed hanging for eight minutes after its reader had gone.
+// The longest healthy call observed took just over two minutes.
+const aiRoundTimeout = 5 * time.Minute
+
+// sendStreamKeepalive writes an SSE comment, which every SSE client ignores
+// but the timeouts above count as traffic.
+func sendStreamKeepalive(w http.ResponseWriter) {
+	_, _ = fmt.Fprint(w, ": keepalive\n\n")
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// lockedResponseWriter serialises writes from the stream reader and the
+// keepalive ticker. Each SSE frame is written with a single Write call, so
+// holding the lock per call keeps frames whole; the order of a data frame and
+// a neighbouring comment does not matter.
+type lockedResponseWriter struct {
+	http.ResponseWriter
+	mu sync.Mutex
+}
+
+func (l *lockedResponseWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.ResponseWriter.Write(p)
+}
+
+func (l *lockedResponseWriter) Flush() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if f, ok := l.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// startStreamKeepalive writes a keepalive every interval until the returned
+// stop function is called. Nothing reaches the browser while a round runs: a
+// model call that answers with a tool call emits no text, a model that is
+// reasoning emits nothing for as long as it thinks, and tool execution writes
+// nothing. Without this, any silence longer than the edge timeouts cuts the
+// connection while the answer is still being worked out. The stop function
+// returns only once the ticker goroutine has exited, so no write can follow it.
+func startStreamKeepalive(w http.ResponseWriter, interval time.Duration) (stop func()) {
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				sendStreamKeepalive(w)
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		wg.Wait()
+	}
+}
+
 func aiReasoningEffort() string {
 	return os.Getenv("ANSWER_AI_REASONING_EFFORT")
+}
+
+// progressLog tells the reader what the assistant is doing while it works.
+// Each line goes out as a reasoning_content delta, which the frontend already
+// renders as a collapsible "Thinking…" panel: its first byte replaces the
+// spinner, and the panel folds away once answer text arrives. The field is
+// otherwise unused on this build, since Bedrock streams no reasoning text for
+// GPT-5.6. The lines are also stored with the assistant's record, so a saved
+// conversation shows what was consulted for its answer.
+type progressLog struct {
+	w     http.ResponseWriter
+	id    string
+	model string
+	text  strings.Builder
+}
+
+func (p *progressLog) note(line string) {
+	if line == "" {
+		return
+	}
+	p.text.WriteString(line)
+	p.text.WriteString("\n")
+	sendStreamData(p.w, StreamResponse{
+		ChatCompletionID: p.id,
+		Object:           "chat.completion.chunk",
+		Created:          time.Now().Unix(),
+		Model:            p.model,
+		Choices: []StreamChoice{
+			{Index: 0, Delta: Delta{ReasoningContent: line + "\n"}, FinishReason: nil},
+		},
+	})
+}
+
+// take returns the lines noted since the last call and forgets them, so an
+// answer spread over several assistant messages stores each line once.
+func (p *progressLog) take() string {
+	text := p.text.String()
+	p.text.Reset()
+	return text
+}
+
+// progressArgRunes bounds the argument quoted in a progress line.
+const progressArgRunes = 80
+
+// describeToolCall renders one tool call as a line for the reader. Answer's
+// own tools are named here; a plugin's tool is described by the plugin when
+// it implements AIToolProgress, and generically otherwise. Only the one
+// argument the reader would recognise is shown, and only when it is a string.
+func (c *AIController) describeToolCall(name string, args map[string]any) string {
+	quoted := func(keys ...string) string {
+		for _, key := range keys {
+			if value, ok := args[key].(string); ok {
+				if value = strings.TrimSpace(value); value != "" {
+					if runes := []rune(value); len(runes) > progressArgRunes {
+						value = string(runes[:progressArgRunes]) + "…"
+					}
+					return " “" + value + "”"
+				}
+			}
+		}
+		return ""
+	}
+
+	switch name {
+	case "semantic_search":
+		return "Searching Answer for" + quoted("query") + "…"
+	case "get_questions":
+		return "Searching Answer's questions for" + quoted("keyword", "tag", "username") + "…"
+	case "get_answers_by_question_id":
+		return "Reading the answers to a question…"
+	case "get_comments":
+		return "Reading comments…"
+	case "get_tags", "get_tag_detail":
+		return "Looking up tags…"
+	case "get_user":
+		return "Looking up a user…"
+	}
+
+	if owner, ok := c.pluginToolOwner(context.Background(), name).(plugin.AIToolProgress); ok {
+		return owner.DescribeToolCall(name, args)
+	}
+	return "Looking something up…"
+}
+
+// describeToolFailure is the line shown when a tool call fails. The model is
+// told the detail as the tool result; the reader only needs to know whether
+// the source had nothing or could not be reached.
+func (c *AIController) describeToolFailure(name string, err error) string {
+	if owner, ok := c.pluginToolOwner(context.Background(), name).(plugin.AIToolProgress); ok {
+		return owner.DescribeToolFailure(name, err)
+	}
+	if stderrors.Is(err, plugin.ErrAIToolResult) {
+		return "That lookup found nothing; continuing."
+	}
+	return "That lookup failed; continuing without it."
 }
 
 // sendStreamData
@@ -452,8 +645,18 @@ func (c *AIController) saveConversationRecord(ctx context.Context, chatcmplID st
 }
 
 func (c *AIController) handleAIConversation(ctx *gin.Context, w http.ResponseWriter, id string, client *openai.Client, conversationCtx *ConversationContext) {
-	maxRounds := 10
+	maxRounds := aiMaxRounds()
 	input := conversationCtx.GetResponseInput()
+
+	// Every write below goes through the lock so the keepalive ticker can share
+	// the connection with the stream reader. The caller's closing frame is
+	// written after this returns, when the ticker has already stopped.
+	w = &lockedResponseWriter{ResponseWriter: w}
+	stopKeepalive := startStreamKeepalive(w, streamKeepaliveInterval)
+	defer stopKeepalive()
+
+	progress := &progressLog{w: w, id: id, model: conversationCtx.Model}
+	progress.note("Working out what to look up…")
 
 	for round := range maxRounds {
 		log.Debugf("AI conversation round: %d", round+1)
@@ -473,8 +676,9 @@ func (c *AIController) handleAIConversation(ctx *gin.Context, w http.ResponseWri
 		log.Debugf("Round %d: toolCalls=%d", round+1, len(toolCalls))
 		if aiResponse != "" {
 			conversationCtx.Messages = append(conversationCtx.Messages, &ai_conversation.ConversationMessage{
-				Role:    "assistant",
-				Content: aiResponse,
+				Role:             "assistant",
+				Content:          aiResponse,
+				ReasoningContent: progress.take(),
 			})
 		}
 
@@ -483,7 +687,7 @@ func (c *AIController) handleAIConversation(ctx *gin.Context, w http.ResponseWri
 		}
 
 		if len(toolCalls) > 0 {
-			input = c.executeToolCalls(ctx, toolCalls, input, aiResponse)
+			input = c.executeToolCalls(ctx, toolCalls, input, aiResponse, progress)
 		} else {
 			return
 		}
@@ -503,10 +707,19 @@ func (c *AIController) handleAIConversation(ctx *gin.Context, w http.ResponseWri
 // every upstream rebase. A provider that streams reasoning_text.delta or
 // reasoning_summary_text.delta would need it added back.
 func (c *AIController) processAIStream(
-	_ *gin.Context, w http.ResponseWriter, id, model string, client *openai.Client, aiReq openai.CreateResponseRequest) (
+	ctx *gin.Context, w http.ResponseWriter, id, model string, client *openai.Client, aiReq openai.CreateResponseRequest) (
 	[]responseFunctionCall, bool, string) {
-	stream, err := client.CreateResponseStream(context.Background(), aiReq)
+	// The request context ends when the browser goes away, which stops paying
+	// for a response nobody will read; the deadline ends a call the provider
+	// never finishes.
+	streamCtx, cancel := context.WithTimeout(ctx.Request.Context(), aiRoundTimeout)
+	defer cancel()
+	stream, err := client.CreateResponseStream(streamCtx, aiReq)
 	if err != nil {
+		if stderrors.Is(err, context.Canceled) {
+			log.Infof("AI stream not started: client disconnected")
+			return nil, true, ""
+		}
 		log.Errorf("Failed to create stream: %v", err)
 		c.sendErrorResponse(w, id, model, "Failed to create AI stream")
 		return nil, true, ""
@@ -529,6 +742,18 @@ func (c *AIController) processAIStream(
 			if stderrors.Is(err, io.EOF) {
 				log.Info("Stream finished")
 				break
+			}
+			if stderrors.Is(err, context.DeadlineExceeded) {
+				log.Errorf("Stream abandoned after %s without completing", aiRoundTimeout)
+				c.sendErrorResponse(w, id, model, "The AI response took too long and was abandoned")
+				return nil, true, accumulatedContent.String()
+			}
+			// The request context ends when the browser goes away. That is the
+			// intended outcome of the cancellation above, not a failure, and
+			// nobody is left to read an error frame.
+			if stderrors.Is(err, context.Canceled) {
+				log.Infof("Stream cancelled: client disconnected")
+				return nil, true, accumulatedContent.String()
 			}
 			log.Errorf("Stream error: %v", err)
 			break
@@ -591,7 +816,7 @@ func (c *AIController) processAIStream(
 
 // executeToolCalls runs each requested tool and appends the call and its result
 // to the input, which is what carries them into the next round.
-func (c *AIController) executeToolCalls(ctx *gin.Context, toolCalls []responseFunctionCall, input []any, assistantContent string) []any {
+func (c *AIController) executeToolCalls(ctx *gin.Context, toolCalls []responseFunctionCall, input []any, assistantContent string, progress *progressLog) []any {
 	if assistantContent != "" {
 		input = append(input, openai.ResponseInputMessage{
 			Type:    "message",
@@ -631,10 +856,19 @@ func (c *AIController) executeToolCalls(ctx *gin.Context, toolCalls []responseFu
 			continue
 		}
 
+		progress.note(c.describeToolCall(toolCall.Name, args))
 		result, err := c.callMCPTool(ctx, toolCall.Name, args)
 		if err != nil {
-			log.Errorf("Failed to call MCP tool %s: %v", toolCall.Name, err)
+			// A result the tool flags as an error is an answer, not a failure of
+			// anything here: the model asked for something that does not exist.
+			// Only a call that could not be made is an error.
+			if stderrors.Is(err, plugin.ErrAIToolResult) {
+				log.Warnf("MCP tool %s returned an error result: %v", toolCall.Name, err)
+			} else {
+				log.Errorf("Failed to call MCP tool %s: %v", toolCall.Name, err)
+			}
 			result = fmt.Sprintf("Error calling tool %s: %v", toolCall.Name, err)
+			progress.note(c.describeToolFailure(toolCall.Name, err))
 		}
 
 		input = append(input, openai.ResponseFunctionCallOutput{
