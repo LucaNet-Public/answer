@@ -58,8 +58,9 @@ const Index: FC<Props> = ({
   });
   const [searchParams] = useSearchParams();
   const answerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLElement>(null);
 
-  useRenderHtmlPlugin(answerRef.current?.querySelector('.fmt') as HTMLElement);
+  useRenderHtmlPlugin(contentRef);
 
   const acceptAnswer = () => {
     acceptanceAnswer({
@@ -132,6 +133,7 @@ const Index: FC<Props> = ({
       </div>
       <ImgViewer>
         <article
+          ref={contentRef}
           className="fmt text-break text-wrap"
           dangerouslySetInnerHTML={{ __html: data?.html }}
         />

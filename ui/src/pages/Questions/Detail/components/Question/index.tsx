@@ -52,7 +52,7 @@ const Index: FC<Props> = ({ data, initPage, hasAnswer, isLogged }) => {
   const [followed, setFollowed] = useState(data?.is_followed);
   const ref = useRef<HTMLDivElement>(null);
 
-  useRenderHtmlPlugin(ref.current);
+  useRenderHtmlPlugin(ref);
 
   const handleFollow = (e) => {
     e.preventDefault();

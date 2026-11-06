@@ -90,7 +90,7 @@ const Index = () => {
   });
 
   const questionContentRef = useRef<HTMLDivElement>(null);
-  useRenderHtmlPlugin(questionContentRef.current);
+  useRenderHtmlPlugin(questionContentRef);
 
   useEffect(() => {
     if (!questionContentRef?.current) {
