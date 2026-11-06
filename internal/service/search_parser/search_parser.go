@@ -129,20 +129,34 @@ func (sp *SearchParser) parseTags(ctx context.Context, query *string) (tags [][]
 	tags = make([][]string, 0)
 	for _, item := range res {
 		tagGroup := make([]string, 0)
-		tag, exists, err := sp.tagCommonService.GetTagBySlugName(ctx, item[1])
-		if err != nil || !exists {
+		// Several slugs in one bracket, separated by |, form one group: a
+		// post matches the group when it carries any of them. The condition
+		// model has always had groups, for a tag and its synonyms; upstream's
+		// syntax just never let a query name more than one tag per group, so
+		// [a] [b] meant both and there was no way to say either. A slug that
+		// is not a tag is dropped from the group rather than failing it.
+		for _, slug := range strings.Split(item[1], "|") {
+			slug = strings.TrimSpace(slug)
+			if slug == "" {
+				continue
+			}
+			tag, exists, err := sp.tagCommonService.GetTagBySlugName(ctx, slug)
+			if err != nil || !exists {
+				continue
+			}
+			tagGroup = append(tagGroup, tag.ID)
+			if tag.MainTagID > 0 {
+				tagGroup = append(tagGroup, fmt.Sprintf("%d", tag.MainTagID))
+			}
+			synIDs, err := sp.tagCommonService.GetTagIDsByMainTagID(ctx, tag.ID)
+			if err != nil {
+				continue
+			}
+			tagGroup = append(tagGroup, synIDs...)
+		}
+		if len(tagGroup) == 0 {
 			continue
 		}
-		tagGroup = append(tagGroup, tag.ID)
-		if tag.MainTagID > 0 {
-			tagGroup = append(tagGroup, fmt.Sprintf("%d", tag.MainTagID))
-		}
-		synIDs, err := sp.tagCommonService.GetTagIDsByMainTagID(ctx, tag.ID)
-		if err != nil || !exists {
-			continue
-		}
-		tagGroup = append(tagGroup, tag.ID)
-		tagGroup = append(tagGroup, synIDs...)
 		tagGroup = converter.UniqueArray(tagGroup)
 		tags = append(tags, tagGroup)
 	}
