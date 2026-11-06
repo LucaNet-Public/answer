@@ -25,6 +25,7 @@ import (
 
 	"github.com/apache/answer/internal/base/reason"
 	"github.com/apache/answer/internal/base/validator"
+	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-gonic/gin"
 	myErrors "github.com/segmentfault/pacman/errors"
 	"github.com/segmentfault/pacman/log"
@@ -43,6 +44,7 @@ func HandleResponse(ctx *gin.Context, err error, data any) {
 	// unknown error
 	if !errors.As(err, &myErr) {
 		log.Error(err, "\n", myErrors.LogStack(2, 5))
+		reportToSentry(ctx, err)
 		ctx.JSON(http.StatusInternalServerError, NewRespBody(
 			http.StatusInternalServerError, reason.UnknownError).TrMsg(lang))
 		return
@@ -51,6 +53,7 @@ func HandleResponse(ctx *gin.Context, err error, data any) {
 	// log internal server error
 	if myErrors.IsInternalServer(myErr) {
 		log.Error(myErr)
+		reportToSentry(ctx, myErr)
 	}
 
 	respBody := NewRespBodyFromError(myErr).TrMsg(lang)
@@ -58,6 +61,16 @@ func HandleResponse(ctx *gin.Context, err error, data any) {
 		respBody.Data = data
 	}
 	ctx.JSON(myErr.Code, respBody)
+}
+
+// Lucanet: reportToSentry reports an error that becomes a 500, on the scope
+// middleware.ReportToSentry gave the request, so the event carries the route
+// and the user. Without that scope -- no DSN, or a handler reached some other
+// way -- it does nothing.
+func reportToSentry(ctx *gin.Context, err error) {
+	if hub := sentrygin.GetHubFromContext(ctx); hub != nil {
+		hub.CaptureException(err)
+	}
 }
 
 // BindAndCheck bind request and check

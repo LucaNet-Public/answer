@@ -56,6 +56,9 @@ func NewHTTPServer(debug bool,
 		uiConf.APIBaseURL+"/answer/api/v1",
 		uiConf.APIBaseURL+"/answer/admin/api",
 	))
+	// Lucanet: inside Recovery, so a panic reaches Sentry with its request
+	// before Recovery answers it. See internal/base/middleware/sentry.go.
+	r.Use(middleware.ReportToSentry()...)
 	r.Use(func(ctx *gin.Context) {
 		if strings.Contains(ctx.Request.URL.Path, "/chat/completions") {
 			return

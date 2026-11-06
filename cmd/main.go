@@ -73,6 +73,12 @@ func Main() {
 }
 
 func runApp() {
+	// Lucanet: before anything that can fail, so a failed start is reported
+	// too. Flushed last, after the server has stopped. See cmd/sentry.go.
+	flushSentry := startSentry()
+	defer flushSentry()
+	defer reportPanic()
+
 	c, err := conf.ReadConfig(path.GetConfigFilePath())
 	if err != nil {
 		panic(err)
