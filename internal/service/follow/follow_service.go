@@ -21,12 +21,12 @@ package follow
 
 import (
 	"context"
-	"github.com/apache/answer/plugin"
 
 	"github.com/apache/answer/internal/entity"
 	"github.com/apache/answer/internal/schema"
 	"github.com/apache/answer/internal/service/activity_common"
 	tagcommon "github.com/apache/answer/internal/service/tag_common"
+	"github.com/apache/answer/plugin"
 )
 
 type FollowRepo interface {

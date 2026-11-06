@@ -135,7 +135,7 @@ func (sp *SearchParser) parseTags(ctx context.Context, query *string) (tags [][]
 		// syntax just never let a query name more than one tag per group, so
 		// [a] [b] meant both and there was no way to say either. A slug that
 		// is not a tag is dropped from the group rather than failing it.
-		for _, slug := range strings.Split(item[1], "|") {
+		for slug := range strings.SplitSeq(item[1], "|") {
 			slug = strings.TrimSpace(slug)
 			if slug == "" {
 				continue

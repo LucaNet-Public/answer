@@ -49,7 +49,7 @@ func (a *AnswerAPIRouter) RegisterMCPRouter(r *gin.RouterGroup, apiKeyAuth gin.H
 		// that sends nothing for 60 seconds. A ping every 30 seconds keeps it
 		// open; the client answers each one with a POST, which the WAF counts.
 		server.WithKeepAlive(true),
-		server.WithKeepAliveInterval(30 * time.Second),
+		server.WithKeepAliveInterval(30*time.Second),
 	)
 	legacy := r.Group("", apiKeyAuth)
 	legacy.GET("/mcp/sse", gin.WrapH(sseServer.SSEHandler()))
