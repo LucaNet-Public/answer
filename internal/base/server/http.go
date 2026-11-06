@@ -115,6 +115,9 @@ func NewHTTPServer(debug bool,
 	pluginAPIRouter.RegisterAuthAdminConnectorRouter(adminauthV1)
 
 	_ = plugin.CallAgent(func(agent plugin.Agent) error {
+		if root, ok := agent.(plugin.RootRouter); ok {
+			root.RegisterRootRouter(rootGroup)
+		}
 		agent.RegisterUnAuthRouter(mustUnAuthV1)
 		agent.RegisterAuthUserRouter(authV1)
 		agent.RegisterAuthAdminRouter(adminauthV1)
@@ -123,7 +126,7 @@ func NewHTTPServer(debug bool,
 
 	// mcp
 	mcpAPIGroup := r.Group(uiConf.APIBaseURL + "/answer/api/v1")
-	mcpAPIGroup.Use(authUserMiddleware.AuthMcpEnable(), authUserMiddleware.AuthAPIKey())
-	answerRouter.RegisterMCPRouter(mcpAPIGroup)
+	mcpAPIGroup.Use(authUserMiddleware.AuthMcpEnable())
+	answerRouter.RegisterMCPRouter(mcpAPIGroup, authUserMiddleware.AuthAPIKey())
 	return r
 }

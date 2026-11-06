@@ -31,6 +31,8 @@ import (
 	tagcommon "github.com/apache/answer/internal/service/tag_common"
 	"github.com/apache/answer/pkg/checker"
 	"github.com/apache/answer/pkg/obj"
+	"github.com/apache/answer/pkg/uid"
+	"github.com/apache/answer/plugin"
 	"github.com/segmentfault/pacman/errors"
 )
 
@@ -51,13 +53,21 @@ func NewObjService(
 	tagRepo tagcommon.TagCommonRepo,
 	tagCommon *tagcommon.TagCommonService,
 ) *ObjService {
-	return &ObjService{
+	service := &ObjService{
 		answerRepo:   answerRepo,
 		questionRepo: questionRepo,
 		commentRepo:  commentRepo,
 		tagRepo:      tagRepo,
 		tagCommon:    tagCommon,
 	}
+	plugin.PublishedObject = func(ctx context.Context, id string) (bool, error) {
+		info, err := service.GetInfo(ctx, uid.DeShortID(id))
+		if err != nil {
+			return false, err
+		}
+		return info.CheckVisibility("", false) == nil, nil
+	}
+	return service
 }
 func (os *ObjService) GetUnreviewedRevisionInfo(ctx context.Context, objectID string) (objInfo *schema.UnreviewedRevisionInfoInfo, err error) {
 	objectType, err := obj.GetObjectTypeStrByObjectID(objectID)

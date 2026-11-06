@@ -45,6 +45,11 @@ type userRepo struct {
 // NewUserRepo new repository
 func NewUserRepo(data *data.Data) usercommon.UserRepo {
 	repo := &userRepo{data: data}
+	plugin.UserAvailable = func(ctx context.Context, id string) (bool, error) {
+		u, exists, err := repo.GetByUserID(ctx, id)
+		return err == nil && exists && u.Status == entity.UserStatusAvailable &&
+			u.MailStatus == entity.EmailStatusAvailable, err
+	}
 	plugin.UserIDByEmail = func(ctx context.Context, email string) (string, bool, error) {
 		user, exists, err := repo.GetByEmail(ctx, email)
 		if err != nil || !exists {

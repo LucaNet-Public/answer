@@ -23,11 +23,12 @@ import (
 	"time"
 
 	"github.com/apache/answer/internal/schema/mcp_tools"
+	"github.com/apache/answer/plugin"
 	"github.com/gin-gonic/gin"
 	"github.com/mark3labs/mcp-go/server"
 )
 
-func (a *AnswerAPIRouter) RegisterMCPRouter(r *gin.RouterGroup) {
+func (a *AnswerAPIRouter) RegisterMCPRouter(r *gin.RouterGroup, apiKeyAuth gin.HandlerFunc) {
 	s := server.NewMCPServer("Answer Enterprise MCP Server", "1.0.0")
 
 	s.AddTool(mcp_tools.NewQuestionsTool(), a.mcpController.MCPQuestionsHandler())
@@ -50,6 +51,13 @@ func (a *AnswerAPIRouter) RegisterMCPRouter(r *gin.RouterGroup) {
 		server.WithKeepAlive(true),
 		server.WithKeepAliveInterval(30 * time.Second),
 	)
-	r.GET("/mcp/sse", gin.WrapH(sseServer.SSEHandler()))
-	r.POST("/mcp/message", gin.WrapH(sseServer.MessageHandler()))
+	legacy := r.Group("", apiKeyAuth)
+	legacy.GET("/mcp/sse", gin.WrapH(sseServer.SSEHandler()))
+	legacy.POST("/mcp/message", gin.WrapH(sseServer.MessageHandler()))
+	_ = plugin.CallBase(func(p plugin.Base) error {
+		if extension, ok := p.(plugin.MCPRouter); ok {
+			extension.RegisterMCPRouter(r, s)
+		}
+		return nil
+	})
 }

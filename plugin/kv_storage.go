@@ -334,3 +334,19 @@ func NewKVOperator(db *xorm.Engine, cache cache.Cache, pluginSlugName string) *K
 		cacheTTL:       30 * time.Minute,
 	}
 }
+
+// CompareAndSwap replaces an existing value only if it still matches expected.
+// Plugins using this for single-use grants must disable the read cache.
+func (kv *KVOperator) CompareAndSwap(ctx context.Context, params KVParams, expected string) (bool, error) {
+	if params.Key == "" {
+		return false, ErrKVKeyEmpty
+	}
+	query, cleanup := kv.getSession(ctx)
+	defer cleanup()
+	affected, err := query.Where(builder.Eq{
+		"plugin_slug_name": kv.pluginSlugName, "`group`": params.Group,
+		"`key`": params.Key, "value": expected,
+	}).Cols("value").Update(&entity.PluginKVStorage{Value: params.Value})
+	kv.cleanCache(ctx, params)
+	return affected == 1, err
+}
