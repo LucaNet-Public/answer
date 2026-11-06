@@ -12,13 +12,17 @@ import { loggedUserInfoStore } from '@/stores';
 // See docs/sentry.md in the Lucanet repository.
 export function startSentry() {
   const dsn = process.env.REACT_APP_SENTRY_DSN;
-  const hostname = window.location.hostname;
-  const environment = hostname && hostname === process.env.REACT_APP_SENTRY_PRODUCTION_HOST
-    ? 'production'
-    : hostname && hostname === process.env.REACT_APP_SENTRY_STAGING_HOST
-      ? 'staging'
-      : undefined;
-  if (!dsn || !environment) {
+  const { hostname } = window.location;
+  if (!dsn || !hostname) {
+    return;
+  }
+  let environment: string | undefined;
+  if (hostname === process.env.REACT_APP_SENTRY_PRODUCTION_HOST) {
+    environment = 'production';
+  } else if (hostname === process.env.REACT_APP_SENTRY_STAGING_HOST) {
+    environment = 'staging';
+  }
+  if (!environment) {
     return;
   }
   Sentry.init({
