@@ -31,6 +31,7 @@ export enum PluginType {
   Captcha = 'captcha',
   Render = 'render',
   Sidebar = 'sidebar',
+  Layout = 'layout',
 }
 
 export interface PluginInfo {

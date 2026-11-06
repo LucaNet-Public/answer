@@ -30,6 +30,7 @@ import {
   errorCodeStore,
   siteSecurityStore,
   themeSettingStore,
+  loggedUserInfoStore,
 } from '@/stores';
 import {
   Header,
@@ -38,7 +39,10 @@ import {
   CustomizeTheme,
   PageTags,
   HttpErrorContent,
+  PluginRender,
 } from '@/components';
+import { PluginType } from '@/utils/pluginKit';
+import request from '@/utils/request';
 import { LoginToContinueModal, BadgeModal } from '@/components/Modal';
 import { changeTheme, Storage, scrollToElementTop } from '@/utils';
 import { useQueryNotificationStatus } from '@/services';
@@ -47,6 +51,7 @@ import { EXTERNAL_CONTENT_DISPLAY_MODE } from '@/common/constants';
 
 const Layout: FC = () => {
   const location = useLocation();
+  const userID = loggedUserInfoStore((state) => state.user.id);
   const { msg: toastMsg, variant, clear: toastClear } = toastStore();
   const externalToast = useExternalToast();
   const externalContentDisplay = siteSecurityStore(
@@ -228,6 +233,13 @@ const Layout: FC = () => {
         <BadgeModal
           badge={notificationData?.badge_award}
           visible={Boolean(notificationData?.badge_award)}
+        />
+        <PluginRender
+          key={userID}
+          type={PluginType.Layout}
+          request={request}
+          baseUrl={process.env.REACT_APP_BASE_URL || ''}
+          userID={userID}
         />
         <ScrollRestoration />
       </SWRConfig>

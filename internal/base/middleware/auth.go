@@ -26,6 +26,7 @@ import (
 	"github.com/apache/answer/internal/schema"
 	"github.com/apache/answer/internal/service/role"
 	"github.com/apache/answer/internal/service/siteinfo_common"
+	"github.com/apache/answer/plugin"
 	"github.com/apache/answer/ui"
 	"github.com/gin-gonic/gin"
 
@@ -39,6 +40,8 @@ import (
 )
 
 var ctxUUIDKey = "ctxUuidKey"
+
+func init() { plugin.CurrentUserID = GetLoginUserIDFromContext }
 
 // AuthUserMiddleware auth user middleware
 type AuthUserMiddleware struct {

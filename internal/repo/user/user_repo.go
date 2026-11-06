@@ -44,9 +44,15 @@ type userRepo struct {
 
 // NewUserRepo new repository
 func NewUserRepo(data *data.Data) usercommon.UserRepo {
-	return &userRepo{
-		data: data,
+	repo := &userRepo{data: data}
+	plugin.UserIDByEmail = func(ctx context.Context, email string) (string, bool, error) {
+		user, exists, err := repo.GetByEmail(ctx, email)
+		if err != nil || !exists {
+			return "", exists, err
+		}
+		return user.ID, true, nil
 	}
+	return repo
 }
 
 // AddUser add user
@@ -67,6 +73,9 @@ func (ur *userRepo) AddUser(ctx context.Context, user *entity.User) (err error) 
 		}
 		return nil, nil
 	})
+	if err == nil {
+		plugin.NotifyUserCreated(ctx, user.ID, user.EMail)
+	}
 	return
 }
 

@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/apache/answer/plugin"
 	"xorm.io/builder"
 
 	"github.com/apache/answer/internal/base/data"
@@ -90,6 +91,9 @@ func (ur *userAdminRepo) AddUser(ctx context.Context, user *entity.User) (err er
 	if err != nil {
 		err = errors.InternalServer(reason.DatabaseError).WithError(err).WithStack()
 	}
+	if err == nil {
+		plugin.NotifyUserCreated(ctx, user.ID, user.EMail)
+	}
 	return
 }
 
@@ -98,6 +102,11 @@ func (ur *userAdminRepo) AddUsers(ctx context.Context, users []*entity.User) (er
 	_, err = ur.data.DB.Context(ctx).Insert(users)
 	if err != nil {
 		err = errors.InternalServer(reason.DatabaseError).WithError(err).WithStack()
+	}
+	if err == nil {
+		for _, user := range users {
+			plugin.NotifyUserCreated(ctx, user.ID, user.EMail)
+		}
 	}
 	return
 }

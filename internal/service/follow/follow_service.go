@@ -21,6 +21,7 @@ package follow
 
 import (
 	"context"
+	"github.com/apache/answer/plugin"
 
 	"github.com/apache/answer/internal/entity"
 	"github.com/apache/answer/internal/schema"
@@ -44,11 +45,17 @@ func NewFollowService(
 	followCommonRepo activity_common.FollowRepo,
 	tagRepo tagcommon.TagCommonRepo,
 ) *FollowService {
-	return &FollowService{
+	fs := &FollowService{
 		followRepo:       followRepo,
 		followCommonRepo: followCommonRepo,
 		tagRepo:          tagRepo,
 	}
+	plugin.LookupTag = tagRepo.GetTagBySlugName
+	plugin.FollowTag = func(ctx context.Context, objectID, userID string) error {
+		_, err := fs.Follow(ctx, &schema.FollowDTO{ObjectID: objectID, UserID: userID})
+		return err
+	}
+	return fs
 }
 
 // Follow or cancel follow object

@@ -55,6 +55,10 @@ var StatusManager = statusManager{
 func Register(p Base) {
 	registerBase(p)
 
+	if hook, ok := p.(NewUser); ok {
+		registerNewUser(hook)
+	}
+
 	if _, ok := p.(Config); ok {
 		registerConfig(p.(Config))
 	}
