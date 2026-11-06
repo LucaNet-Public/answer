@@ -211,7 +211,7 @@ func TestMentionEmailDeliveryHonoursSavedPreferences(t *testing.T) {
 				if !tc.mention && strings.Contains(subject, "mentioned you") {
 					t.Fatalf("ordinary comment used mention subject: %q", subject)
 				}
-				var body io.Reader = msg.Body
+				body := msg.Body
 				if msg.Header.Get("Content-Transfer-Encoding") == "quoted-printable" {
 					body = quotedprintable.NewReader(body)
 				}
