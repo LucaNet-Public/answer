@@ -214,7 +214,15 @@ function diffText(newText: string, oldText?: string): string {
     return escapeHtml(newText);
   }
   let result = [];
-  const diff = Diff.diffChars(escapeHtml(oldText), escapeHtml(newText));
+  // A character diff of a rewritten sentence interleaves the two versions
+  // letter by letter and neither can be read back out. Diffing on word
+  // boundaries keeps each version's words whole; the WithSpace variant
+  // keeps whitespace as its own tokens, which is what formatDiffPart's
+  // newline handling below expects.
+  const diff = Diff.diffWordsWithSpace(
+    escapeHtml(oldText),
+    escapeHtml(newText),
+  );
   result = diff.map((part) => {
     if (part.added) {
       return formatDiffPart(part, 'review-text-add');
