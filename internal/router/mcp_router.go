@@ -34,6 +34,10 @@ func (a *AnswerAPIRouter) RegisterMCPRouter(r *gin.RouterGroup) {
 	s.AddTool(mcp_tools.NewTagsTool(), a.mcpController.MCPTagsHandler())
 	s.AddTool(mcp_tools.NewTagDetailTool(), a.mcpController.MCPTagDetailsHandler())
 	s.AddTool(mcp_tools.NewUserTool(), a.mcpController.MCPUserDetailsHandler())
+	// Upstream defines semantic_search and its handler for this server but never
+	// registers them, so a client could reach only get_questions, which returns
+	// the five newest matches. This is the retrieval the assistant itself uses.
+	s.AddTool(mcp_tools.NewSemanticSearchTool(), a.mcpController.MCPSemanticSearchHandler())
 
 	sseServer := server.NewSSEServer(s,
 		server.WithSSEEndpoint("/answer/api/v1/mcp/see"),
