@@ -20,6 +20,8 @@
 package router
 
 import (
+	"time"
+
 	"github.com/apache/answer/internal/schema/mcp_tools"
 	"github.com/gin-gonic/gin"
 	"github.com/mark3labs/mcp-go/server"
@@ -42,6 +44,11 @@ func (a *AnswerAPIRouter) RegisterMCPRouter(r *gin.RouterGroup) {
 	sseServer := server.NewSSEServer(s,
 		server.WithSSEEndpoint("/answer/api/v1/mcp/see"),
 		server.WithMessageEndpoint("/answer/api/v1/mcp/message"),
+		// The stream is silent between messages, and CloudFront cuts a response
+		// that sends nothing for 60 seconds. A ping every 30 seconds keeps it
+		// open; the client answers each one with a POST, which the WAF counts.
+		server.WithKeepAlive(true),
+		server.WithKeepAliveInterval(30 * time.Second),
 	)
 	r.GET("/mcp/sse", gin.WrapH(sseServer.SSEHandler()))
 	r.POST("/mcp/message", gin.WrapH(sseServer.MessageHandler()))
