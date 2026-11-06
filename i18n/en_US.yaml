@@ -2360,6 +2360,14 @@ ui:
       model:
         label: Model
         msg: Model is required
+      prompt:
+        label: Prompt
+        text: >-
+          Instructions sent to the model with every question. Use %s to mark
+          where the user's question is inserted; it is required and the question
+          is placed there rather than appended. Leave empty to use the built-in
+          default.
+        msg: The prompt must contain %s, which marks where the user's question is inserted.
       add_success: AI settings updated successfully.
     conversations:
       topic: Topic
