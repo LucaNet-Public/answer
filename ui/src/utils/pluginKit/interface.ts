@@ -27,11 +27,20 @@ export enum PluginType {
   Search = 'search',
   Editor = 'editor',
   EditorReplacement = 'editor_replacement',
+  ShareReplacement = 'share_replacement',
   Route = 'route',
   Captcha = 'captcha',
   Render = 'render',
   Sidebar = 'sidebar',
   Layout = 'layout',
+}
+
+export interface ShareReplacementProps {
+  type: 'answer' | 'question';
+  url: string;
+  title: string;
+  className?: string;
+  mode?: 'normal' | 'mobile';
 }
 
 export interface PluginInfo {

@@ -27,6 +27,11 @@ import classNames from 'classnames';
 
 import { BASE_ORIGIN } from '@/router/alias';
 import { loggedUserInfoStore } from '@/stores';
+import { getReplacementPlugin, PluginType } from '@/utils/pluginKit';
+import type {
+  Plugin,
+  ShareReplacementProps,
+} from '@/utils/pluginKit/interface';
 
 interface IProps {
   type: 'answer' | 'question';
@@ -43,6 +48,7 @@ const Index: FC<IProps> = ({ type, qid, aid, title, className, mode }) => {
   const [show, setShow] = useState(false);
   const [showTip, setShowTip] = useState(false);
   const [canSystemShare, setSystemShareState] = useState(false);
+  const [replacement, setReplacement] = useState<Plugin | null>();
   const { t } = useTranslation();
   let baseUrl =
     type === 'question'
@@ -77,10 +83,33 @@ const Index: FC<IProps> = ({ type, qid, aid, title, className, mode }) => {
     });
   };
   useEffect(() => {
+    let mounted = true;
+    getReplacementPlugin(PluginType.ShareReplacement)
+      .catch(() => null)
+      .then((plugin) => {
+        if (mounted) setReplacement(plugin);
+      });
     if (window.navigator?.canShare?.({ text: 'can_share' })) {
       setSystemShareState(true);
     }
+    return () => {
+      mounted = false;
+    };
   }, []);
+
+  if (replacement === undefined) return null;
+  if (replacement?.component) {
+    const Component = replacement.component as FC<ShareReplacementProps>;
+    return (
+      <Component
+        type={type}
+        url={baseUrl}
+        title={title}
+        className={className}
+        mode={mode}
+      />
+    );
+  }
 
   if (mode === 'mobile') {
     if (canSystemShare) {
