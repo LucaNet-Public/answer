@@ -24,6 +24,8 @@ import classnames from 'classnames';
 
 import { Avatar, FormatTime } from '@/components';
 import { formatCount } from '@/utils';
+import { UserInfoBase } from '@/common/interface';
+import PostEditInfo from '../PostEditInfo';
 
 interface Props {
   data: any;
@@ -34,6 +36,7 @@ interface Props {
   className?: string;
   updateTime?: number;
   updateTimePrefix?: string;
+  updateUser?: UserInfoBase;
 }
 
 const Index: FC<Props> = ({
@@ -45,6 +48,7 @@ const Index: FC<Props> = ({
   className = '',
   updateTime = 0,
   updateTimePrefix = '',
+  updateUser,
 }) => {
   return (
     <div className={classnames('d-flex', className)}>
@@ -85,7 +89,7 @@ const Index: FC<Props> = ({
           />
         </>
       )}
-      <div className="small text-secondary d-flex flex-column">
+      <div className="small text-secondary">
         <div className="me-1 me-md-0 d-flex align-items-center">
           {data?.status !== 'deleted' ? (
             <Link
@@ -135,6 +139,9 @@ const Index: FC<Props> = ({
               )}
             </>
           ))}
+        {!!time && updateTime > 0 && (
+          <PostEditInfo author={data} editor={updateUser} />
+        )}
       </div>
     </div>
   );

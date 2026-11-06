@@ -32,6 +32,7 @@ import {
   htmlRender,
   ImgViewer,
 } from '@/components';
+import PostEditInfo from '@/components/PostEditInfo';
 import { useRenderHtmlPlugin } from '@/utils/pluginKit';
 import { formatCount, guard } from '@/utils';
 import { following } from '@/services';
@@ -115,13 +116,21 @@ const Index: FC<Props> = ({ data, initPage, hasAnswer, isLogged }) => {
               />
             </Link>
 
-            <Link to={`/posts/${data.id}/timeline`}>
-              <FormatTime
-                time={data.edit_time}
-                preFix={t('Edited')}
-                className="me-3 link-secondary"
-              />
-            </Link>
+            {!!data.edit_time && (
+              <span className="me-3">
+                <Link to={`/posts/${data.id}/timeline`}>
+                  <FormatTime
+                    time={data.edit_time}
+                    preFix={t('Edited')}
+                    className="link-secondary"
+                  />
+                </Link>
+                <PostEditInfo
+                  author={data.user_info}
+                  editor={data.update_user_info}
+                />
+              </span>
+            )}
           </>
         ) : (
           <>
@@ -131,11 +140,19 @@ const Index: FC<Props> = ({ data, initPage, hasAnswer, isLogged }) => {
               className="me-3 link-secondary"
             />
 
-            <FormatTime
-              time={data.edit_time}
-              preFix={t('Edited')}
-              className="me-3 link-secondary"
-            />
+            {!!data.edit_time && (
+              <span className="me-3">
+                <FormatTime
+                  time={data.edit_time}
+                  preFix={t('Edited')}
+                  className="link-secondary"
+                />
+                <PostEditInfo
+                  author={data.user_info}
+                  editor={data.update_user_info}
+                />
+              </span>
+            )}
           </>
         )}
 

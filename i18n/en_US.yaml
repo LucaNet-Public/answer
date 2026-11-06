@@ -1432,6 +1432,7 @@ ui:
     asked: asked
     update: Modified
     Edited: Edited
+    edited_by: " by <editor/>"
     edit: edited
     commented: commented
     Views: Viewed

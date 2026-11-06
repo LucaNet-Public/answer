@@ -116,7 +116,8 @@ const Index: FC<Props> = ({
             data={data?.user_info}
             time={Number(data.create_time)}
             updateTime={Number(data.update_time)}
-            updateTimePrefix={t('edit')}
+            updateTimePrefix={t('Edited')}
+            updateUser={data.update_user_info}
             isLogged={isLogged}
             timelinePath={`/posts/${data.question_id}/${data.id}/timeline`}
           />
