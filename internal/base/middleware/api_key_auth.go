@@ -20,6 +20,8 @@
 package middleware
 
 import (
+	"strings"
+
 	"github.com/apache/answer/internal/base/handler"
 	"github.com/apache/answer/internal/base/reason"
 	"github.com/gin-gonic/gin"
@@ -35,7 +37,16 @@ func (am *AuthUserMiddleware) AuthAPIKey() gin.HandlerFunc {
 			ctx.Abort()
 			return
 		}
-		pass, err := am.authService.AuthAPIKey(ctx, ctx.Request.Method == "GET", token)
+		// Answer mounts this middleware on the MCP routes only, and every tool
+		// there reads. The SSE transport opens its stream with a GET but posts
+		// every message, so judging a read by the method refused a read-only
+		// key from initialize on. Matching the route template rather than the
+		// request path keeps a route that later reuses this middleware, or a
+		// path that merely embeds the MCP prefix, from inheriting the change.
+		route := ctx.FullPath()
+		isRead := ctx.Request.Method == "GET" ||
+			strings.HasSuffix(route, "/mcp/sse") || strings.HasSuffix(route, "/mcp/message")
+		pass, err := am.authService.AuthAPIKey(ctx, isRead, token)
 		if err != nil {
 			handler.HandleResponse(ctx, errors.Unauthorized(reason.UnauthorizedError), nil)
 			ctx.Abort()
