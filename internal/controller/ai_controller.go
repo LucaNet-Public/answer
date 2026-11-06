@@ -22,9 +22,12 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -163,15 +166,35 @@ type ConversationContext struct {
 	Model             string
 }
 
-func (c *ConversationContext) GetOpenAIMessages() []openai.ChatCompletionMessage {
-	messages := make([]openai.ChatCompletionMessage, len(c.Messages))
+// GetResponseInput renders the stored conversation as Responses API input
+// items. The Responses API takes a heterogeneous list: messages, function calls
+// and function call outputs are all items, which is why this is []any rather
+// than a message slice.
+func (c *ConversationContext) GetResponseInput() []any {
+	input := make([]any, len(c.Messages))
 	for i, msg := range c.Messages {
-		messages[i] = openai.ChatCompletionMessage{
+		input[i] = openai.ResponseInputMessage{
+			Type:    "message",
 			Role:    msg.Role,
 			Content: msg.Content,
 		}
 	}
-	return messages
+	return input
+}
+
+// responseFunctionCall is one tool call the model asked for, carried between
+// the stream reader and the tool executor.
+type responseFunctionCall struct {
+	CallID    string
+	Name      string
+	Arguments string
+}
+
+// aiReasoningEffort is the reasoning effort sent with every request, from
+// ANSWER_AI_REASONING_EFFORT. Empty by default, so the field is omitted and the
+// provider's own default applies.
+func aiReasoningEffort() string {
+	return os.Getenv("ANSWER_AI_REASONING_EFFORT")
 }
 
 // sendStreamData
@@ -210,9 +233,6 @@ func (c *AIController) ChatCompletions(ctx *gin.Context) {
 		return
 	}
 	req.UserID = middleware.GetLoginUserIDFromContext(ctx)
-
-	data, _ := json.Marshal(req)
-	log.Infof("ai chat request data: %s", string(data))
 
 	ctx.Header("Content-Type", "text/event-stream")
 	ctx.Header("Cache-Control", "no-cache")
@@ -432,27 +452,28 @@ func (c *AIController) saveConversationRecord(ctx context.Context, chatcmplID st
 
 func (c *AIController) handleAIConversation(ctx *gin.Context, w http.ResponseWriter, id string, client *openai.Client, conversationCtx *ConversationContext) {
 	maxRounds := 10
-	messages := conversationCtx.GetOpenAIMessages()
+	input := conversationCtx.GetResponseInput()
 
 	for round := range maxRounds {
 		log.Debugf("AI conversation round: %d", round+1)
 
-		aiReq := openai.ChatCompletionRequest{
-			Model:    conversationCtx.Model,
-			Messages: messages,
-			Tools:    c.getMCPTools(),
-			Stream:   true,
+		aiReq := openai.CreateResponseRequest{
+			Model:  conversationCtx.Model,
+			Input:  input,
+			Tools:  c.getMCPTools(),
+			Stream: true,
+		}
+		if effort := aiReasoningEffort(); effort != "" {
+			aiReq.Reasoning = &openai.ResponseReasoning{Effort: effort}
 		}
 
-		toolCalls, newMessages, finished, aiResponse, reasoningContent := c.processAIStream(ctx, w, id, conversationCtx.Model, client, aiReq, messages)
-		messages = newMessages
+		toolCalls, finished, aiResponse := c.processAIStream(ctx, w, id, conversationCtx.Model, client, aiReq)
 
-		log.Debugf("Round %d: toolCalls=%v", round+1, toolCalls)
-		if aiResponse != "" || reasoningContent != "" {
+		log.Debugf("Round %d: toolCalls=%d", round+1, len(toolCalls))
+		if aiResponse != "" {
 			conversationCtx.Messages = append(conversationCtx.Messages, &ai_conversation.ConversationMessage{
-				Role:             "assistant",
-				Content:          aiResponse,
-				ReasoningContent: reasoningContent,
+				Role:    "assistant",
+				Content: aiResponse,
 			})
 		}
 
@@ -461,7 +482,7 @@ func (c *AIController) handleAIConversation(ctx *gin.Context, w http.ResponseWri
 		}
 
 		if len(toolCalls) > 0 {
-			messages = c.executeToolCalls(ctx, w, id, conversationCtx.Model, toolCalls, messages, aiResponse, reasoningContent)
+			input = c.executeToolCalls(ctx, toolCalls, input, aiResponse)
 		} else {
 			return
 		}
@@ -470,30 +491,41 @@ func (c *AIController) handleAIConversation(ctx *gin.Context, w http.ResponseWri
 	log.Warnf("AI conversation reached maximum rounds limit: %d", maxRounds)
 }
 
-// processAIStream
+// processAIStream consumes one Responses API stream, forwarding text to the
+// browser as it arrives and collecting any tool calls the model asked for. The
+// events it reads are Responses events; what it writes is still Answer's own
+// chat.completion.chunk shape, so the frontend is unchanged.
+//
+// Reasoning is deliberately not handled. Bedrock emits a reasoning output item
+// with no text for GPT-5.6, with reasoning.summary set to auto or detailed
+// alike, so a reasoning branch here would be unreachable code carried across
+// every upstream rebase. A provider that streams reasoning_text.delta or
+// reasoning_summary_text.delta would need it added back.
 func (c *AIController) processAIStream(
-	_ *gin.Context, w http.ResponseWriter, id, model string, client *openai.Client, aiReq openai.ChatCompletionRequest, messages []openai.ChatCompletionMessage) (
-	[]openai.ToolCall, []openai.ChatCompletionMessage, bool, string, string) {
-	stream, err := client.CreateChatCompletionStream(context.Background(), aiReq)
+	_ *gin.Context, w http.ResponseWriter, id, model string, client *openai.Client, aiReq openai.CreateResponseRequest) (
+	[]responseFunctionCall, bool, string) {
+	stream, err := client.CreateResponseStream(context.Background(), aiReq)
 	if err != nil {
 		log.Errorf("Failed to create stream: %v", err)
 		c.sendErrorResponse(w, id, model, "Failed to create AI stream")
-		return nil, messages, true, "", ""
+		return nil, true, ""
 	}
 	defer func() {
 		_ = stream.Close()
 	}()
 
-	var currentToolCalls []openai.ToolCall
+	var toolCalls []responseFunctionCall
 	var accumulatedContent strings.Builder
-	var accumulatedReasoning strings.Builder
-	var accumulatedMessage openai.ChatCompletionMessage
-	toolCallsMap := make(map[int]*openai.ToolCall)
+	completed := false
 
 	for {
-		response, err := stream.Recv()
+		event, err := stream.Recv()
 		if err != nil {
-			if err.Error() == "EOF" {
+			// The stream signals its end with io.EOF. Comparing the message
+			// text instead would miss a wrapped error and treat a clean end of
+			// stream as a failure. The stdlib import is aliased because this
+			// file already imports pacman/errors as errors.
+			if stderrors.Is(err, io.EOF) {
 				log.Info("Stream finished")
 				break
 			}
@@ -501,182 +533,117 @@ func (c *AIController) processAIStream(
 			break
 		}
 
-		if len(response.Choices) == 0 {
-			continue
-		}
-
-		choice := response.Choices[0]
-
-		if len(choice.Delta.ToolCalls) > 0 {
-			for _, deltaToolCall := range choice.Delta.ToolCalls {
-				index := *deltaToolCall.Index
-
-				if _, exists := toolCallsMap[index]; !exists {
-					toolCallsMap[index] = &openai.ToolCall{
-						ID:   deltaToolCall.ID,
-						Type: deltaToolCall.Type,
-						Function: openai.FunctionCall{
-							Name:      deltaToolCall.Function.Name,
-							Arguments: deltaToolCall.Function.Arguments,
-						},
-					}
-				} else {
-					if deltaToolCall.Function.Arguments != "" {
-						toolCallsMap[index].Function.Arguments += deltaToolCall.Function.Arguments
-					}
-					if deltaToolCall.Function.Name != "" {
-						toolCallsMap[index].Function.Name = deltaToolCall.Function.Name
-					}
-				}
-			}
-		}
-
-		if choice.Delta.ReasoningContent != "" {
-			accumulatedReasoning.WriteString(choice.Delta.ReasoningContent)
-
-			reasoningResponse := StreamResponse{
-				ChatCompletionID: id,
-				Object:           "chat.completion.chunk",
-				Created:          time.Now().Unix(),
-				Model:            model,
-				Choices: []StreamChoice{
-					{
-						Index: 0,
-						Delta: Delta{
-							ReasoningContent: choice.Delta.ReasoningContent,
-						},
-						FinishReason: nil,
-					},
-				},
-			}
-			sendStreamData(w, reasoningResponse)
-		}
-
-		if choice.Delta.Content != "" {
-			accumulatedContent.WriteString(choice.Delta.Content)
-
-			contentResponse := StreamResponse{
-				ChatCompletionID: id,
-				Object:           "chat.completion.chunk",
-				Created:          time.Now().Unix(),
-				Model:            model,
-				Choices: []StreamChoice{
-					{
-						Index: 0,
-						Delta: Delta{
-							Content: choice.Delta.Content,
-						},
-						FinishReason: nil,
-					},
-				},
-			}
-			sendStreamData(w, contentResponse)
-		}
-
-		if len(choice.FinishReason) > 0 {
-			if choice.FinishReason == "tool_calls" {
-				for _, toolCall := range toolCallsMap {
-					currentToolCalls = append(currentToolCalls, *toolCall)
-				}
-				return currentToolCalls, messages, false, accumulatedContent.String(), accumulatedReasoning.String()
-			} else {
-				aiResponseContent := accumulatedContent.String()
-				aiReasoningContent := accumulatedReasoning.String()
-				if aiResponseContent != "" || aiReasoningContent != "" {
-					accumulatedMessage = openai.ChatCompletionMessage{
-						Role:             openai.ChatMessageRoleAssistant,
-						Content:          aiResponseContent,
-						ReasoningContent: aiReasoningContent,
-					}
-					messages = append(messages, accumulatedMessage)
-				}
-				return nil, messages, true, aiResponseContent, aiReasoningContent
-			}
-		}
-	}
-
-	aiResponseContent := accumulatedContent.String()
-	aiReasoningContent := accumulatedReasoning.String()
-	if aiResponseContent != "" || aiReasoningContent != "" {
-		accumulatedMessage = openai.ChatCompletionMessage{
-			Role:             openai.ChatMessageRoleAssistant,
-			Content:          aiResponseContent,
-			ReasoningContent: aiReasoningContent,
-		}
-		messages = append(messages, accumulatedMessage)
-	}
-
-	if len(toolCallsMap) > 0 {
-		for _, toolCall := range toolCallsMap {
-			currentToolCalls = append(currentToolCalls, *toolCall)
-		}
-		return currentToolCalls, messages, false, aiResponseContent, aiReasoningContent
-	}
-
-	return currentToolCalls, messages, len(currentToolCalls) == 0, aiResponseContent, aiReasoningContent
-}
-
-// executeToolCalls
-func (c *AIController) executeToolCalls(ctx *gin.Context, _ http.ResponseWriter, _, _ string, toolCalls []openai.ToolCall, messages []openai.ChatCompletionMessage, assistantContent, reasoningContent string) []openai.ChatCompletionMessage {
-	validToolCalls := make([]openai.ToolCall, 0)
-	for _, toolCall := range toolCalls {
-		if toolCall.ID == "" || toolCall.Function.Name == "" {
-			log.Errorf("Invalid tool call: missing required fields. ID: %s, Function: %v", toolCall.ID, toolCall.Function)
-			continue
-		}
-
-		if toolCall.Function.Arguments == "" {
-			toolCall.Function.Arguments = "{}"
-		}
-
-		validToolCalls = append(validToolCalls, toolCall)
-		log.Debugf("Valid tool call: ID=%s, Name=%s, Arguments=%s", toolCall.ID, toolCall.Function.Name, toolCall.Function.Arguments)
-	}
-
-	if len(validToolCalls) == 0 {
-		log.Warn("No valid tool calls found")
-		return messages
-	}
-
-	assistantMsg := openai.ChatCompletionMessage{
-		Role:             openai.ChatMessageRoleAssistant,
-		Content:          assistantContent,
-		ReasoningContent: reasoningContent,
-		ToolCalls:        validToolCalls,
-	}
-	messages = append(messages, assistantMsg)
-
-	for _, toolCall := range validToolCalls {
-		if toolCall.Function.Name != "" {
-			var args map[string]any
-			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-				log.Errorf("Failed to parse tool arguments for %s: %v, arguments: %s", toolCall.Function.Name, err, toolCall.Function.Arguments)
-				errorResult := fmt.Sprintf("Error parsing tool arguments: %v", err)
-				toolMessage := openai.ChatCompletionMessage{
-					Role:       openai.ChatMessageRoleTool,
-					Content:    errorResult,
-					ToolCallID: toolCall.ID,
-				}
-				messages = append(messages, toolMessage)
+		switch event.Type {
+		case openai.ResponseStreamEventOutputTextDelta:
+			if event.Delta == "" {
 				continue
 			}
+			accumulatedContent.WriteString(event.Delta)
+			sendStreamData(w, StreamResponse{
+				ChatCompletionID: id,
+				Object:           "chat.completion.chunk",
+				Created:          time.Now().Unix(),
+				Model:            model,
+				Choices: []StreamChoice{
+					{Index: 0, Delta: Delta{Content: event.Delta}, FinishReason: nil},
+				},
+			})
 
-			result, err := c.callMCPTool(ctx, toolCall.Function.Name, args)
-			if err != nil {
-				log.Errorf("Failed to call MCP tool %s: %v", toolCall.Function.Name, err)
-				result = fmt.Sprintf("Error calling tool %s: %v", toolCall.Function.Name, err)
+		// A completed function_call item carries the whole call, so the
+		// argument deltas that preceded it need no accumulation of their own.
+		case openai.ResponseStreamEventOutputItemDone:
+			if event.Item == nil || event.Item.Type != "function_call" {
+				continue
 			}
+			toolCalls = append(toolCalls, responseFunctionCall{
+				CallID:    event.Item.CallID,
+				Name:      event.Item.Name,
+				Arguments: event.Item.Arguments,
+			})
 
-			toolMessage := openai.ChatCompletionMessage{
-				Role:       openai.ChatMessageRoleTool,
-				Content:    result,
-				ToolCallID: toolCall.ID,
+		case openai.ResponseStreamEventCompleted:
+			completed = true
+
+		case openai.ResponseStreamEventFailed, openai.ResponseStreamEventError:
+			message := event.Message
+			if event.Error != nil && event.Error.Message != "" {
+				message = event.Error.Message
 			}
-			messages = append(messages, toolMessage)
+			if event.Response != nil && event.Response.Error != nil && event.Response.Error.Message != "" {
+				message = event.Response.Error.Message
+			}
+			log.Errorf("AI stream reported failure: %s", message)
+			c.sendErrorResponse(w, id, model, "AI request failed")
+			return nil, true, accumulatedContent.String()
 		}
 	}
 
-	return messages
+	// Tool calls mean another round; anything else ends the conversation. A
+	// stream that ends without completing is treated as finished so a truncated
+	// response cannot spin the round loop.
+	if len(toolCalls) > 0 {
+		return toolCalls, false, accumulatedContent.String()
+	}
+	_ = completed
+	return nil, true, accumulatedContent.String()
+}
+
+// executeToolCalls runs each requested tool and appends the call and its result
+// to the input, which is what carries them into the next round.
+func (c *AIController) executeToolCalls(ctx *gin.Context, toolCalls []responseFunctionCall, input []any, assistantContent string) []any {
+	if assistantContent != "" {
+		input = append(input, openai.ResponseInputMessage{
+			Type:    "message",
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: assistantContent,
+		})
+	}
+
+	for _, toolCall := range toolCalls {
+		if toolCall.CallID == "" || toolCall.Name == "" {
+			log.Errorf("Invalid tool call: missing required fields. CallID: %s, Name: %s", toolCall.CallID, toolCall.Name)
+			continue
+		}
+
+		arguments := toolCall.Arguments
+		if arguments == "" {
+			arguments = "{}"
+		}
+
+		// The call is echoed back before its output: the Responses API pairs
+		// them by call_id, and an output without its call is rejected.
+		input = append(input, openai.ResponseOutputItem{
+			Type:      "function_call",
+			CallID:    toolCall.CallID,
+			Name:      toolCall.Name,
+			Arguments: arguments,
+		})
+
+		var args map[string]any
+		if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+			log.Errorf("Failed to parse tool arguments for %s: %v", toolCall.Name, err)
+			input = append(input, openai.ResponseFunctionCallOutput{
+				Type:   "function_call_output",
+				CallID: toolCall.CallID,
+				Output: fmt.Sprintf("Error parsing tool arguments: %v", err),
+			})
+			continue
+		}
+
+		result, err := c.callMCPTool(ctx, toolCall.Name, args)
+		if err != nil {
+			log.Errorf("Failed to call MCP tool %s: %v", toolCall.Name, err)
+			result = fmt.Sprintf("Error calling tool %s: %v", toolCall.Name, err)
+		}
+
+		input = append(input, openai.ResponseFunctionCallOutput{
+			Type:   "function_call_output",
+			CallID: toolCall.CallID,
+			Output: result,
+		})
+	}
+
+	return input
 }
 
 // sendErrorResponse send error response in stream
@@ -700,8 +667,8 @@ func (c *AIController) sendErrorResponse(w http.ResponseWriter, id, model, error
 }
 
 // getMCPTools
-func (c *AIController) getMCPTools() []openai.Tool {
-	openaiTools := make([]openai.Tool, 0)
+func (c *AIController) getMCPTools() []openai.ResponseTool {
+	openaiTools := make([]openai.ResponseTool, 0)
 	for _, mcpTool := range mcp_tools.MCPToolsList {
 		openaiTool := c.convertMCPToolToOpenAI(mcpTool)
 		openaiTools = append(openaiTools, openaiTool)
@@ -711,7 +678,7 @@ func (c *AIController) getMCPTools() []openai.Tool {
 }
 
 // convertMCPToolToOpenAI
-func (c *AIController) convertMCPToolToOpenAI(mcpTool mcp.Tool) openai.Tool {
+func (c *AIController) convertMCPToolToOpenAI(mcpTool mcp.Tool) openai.ResponseTool {
 	properties := make(map[string]any)
 	required := make([]string, 0)
 
@@ -728,14 +695,13 @@ func (c *AIController) convertMCPToolToOpenAI(mcpTool mcp.Tool) openai.Tool {
 		parameters["required"] = required
 	}
 
-	return openai.Tool{
-		Type: openai.ToolTypeFunction,
-		Function: &openai.FunctionDefinition{
-			Name:        mcpTool.Name,
-			Description: mcpTool.Description,
-			Parameters:  parameters,
-		},
-	}
+	// Responses tools are flat: name, description and parameters sit on the
+	// tool itself rather than under a function object.
+	return openai.NewResponseFunctionTool(openai.FunctionDefinition{
+		Name:        mcpTool.Name,
+		Description: mcpTool.Description,
+		Parameters:  parameters,
+	})
 }
 
 // callMCPTool
