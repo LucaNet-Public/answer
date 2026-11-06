@@ -113,9 +113,15 @@ func (r *aiConversationRepo) CreateRecord(ctx context.Context, record *entity.AI
 // GetRecordsByConversationID get records by conversation ID
 func (r *aiConversationRepo) GetRecordsByConversationID(ctx context.Context, conversationID string) ([]*entity.AIConversationRecord, error) {
 	records := make([]*entity.AIConversationRecord, 0)
+	// A turn's user and assistant rows are written back to back once the
+	// stream has ended, and xorm stores TIMESTAMP columns at whole-second
+	// precision, so the pair almost always shares one created_at. Ordering
+	// by that alone leaves the tie to the database, which returns the
+	// answer before its question often enough to notice. The primary key
+	// is assigned in insertion order and breaks the tie deterministically.
 	err := r.data.DB.Context(ctx).
 		Where(builder.Eq{"conversation_id": conversationID}).
-		OrderBy("created_at ASC").
+		OrderBy("created_at ASC, id ASC").
 		Find(&records)
 	if err != nil {
 		log.Errorf("get ai conversation records failed: %v", err)

@@ -189,8 +189,9 @@ func (s *aiConversationService) GetConversationDetail(ctx context.Context, req *
 	}
 
 	recordList := make([]*schema.AIConversationRecord, 0, len(records))
-	for i, record := range records {
-		if i == 0 {
+	openingID := firstUserRecordID(records)
+	for _, record := range records {
+		if record.ID == openingID {
 			record.Content = conversation.Topic
 		}
 		recordList = append(recordList, &schema.AIConversationRecord{
@@ -319,8 +320,9 @@ func (s *aiConversationService) GetConversationDetailForAdmin(ctx context.Contex
 	}
 
 	recordList := make([]schema.AIConversationRecord, 0, len(records))
-	for i, record := range records {
-		if i == 0 {
+	openingID := firstUserRecordID(records)
+	for _, record := range records {
+		if record.ID == openingID {
 			record.Content = conversation.Topic
 		}
 		recordList = append(recordList, schema.AIConversationRecord{
@@ -341,6 +343,22 @@ func (s *aiConversationService) GetConversationDetailForAdmin(ctx context.Contex
 		Records:        recordList,
 		CreatedAt:      conversation.CreatedAt.Unix(),
 	}, nil
+}
+
+// firstUserRecordID returns the ID of the record holding the opening
+// question, or zero when there is none. The opening question is stored as the
+// full rendered prompt with the question spliced in, and the topic stands in
+// for it wherever the conversation is shown. Finding it by role rather than by
+// position means a first row that is not the question, whatever the reason,
+// is shown as it is rather than being overwritten with the topic while the
+// prompt appears in full a row later.
+func firstUserRecordID(records []*entity.AIConversationRecord) int {
+	for _, record := range records {
+		if record.Role == "user" {
+			return record.ID
+		}
+	}
+	return 0
 }
 
 // getUserInfo
