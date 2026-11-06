@@ -92,8 +92,12 @@ func (us *UserNotificationConfigService) UpdateUserNotificationConfig(
 // SetDefaultUserNotificationConfig set default user notification config for user register
 func (us *UserNotificationConfigService) SetDefaultUserNotificationConfig(ctx context.Context, userIDs []string) (
 	err error) {
+	if err = us.userNotificationConfigRepo.Add(ctx, userIDs,
+		string(constant.InboxSource), `[{"key":"email","enable":true}]`); err != nil {
+		return err
+	}
 	return us.userNotificationConfigRepo.Add(ctx, userIDs,
-		string(constant.InboxSource), `[{"key":"email","enable":true}]`)
+		string(constant.AllNewQuestionForFollowingTagsSource), `[{"key":"email","enable":true}]`)
 }
 
 func (us *UserNotificationConfigService) convertToEntity(_ context.Context, userID string,
