@@ -46,6 +46,7 @@ import (
 	tagcommonser "github.com/apache/answer/internal/service/tag_common"
 	usercommon "github.com/apache/answer/internal/service/user_common"
 	"github.com/apache/answer/pkg/token"
+	"github.com/apache/answer/plugin"
 	"github.com/gin-gonic/gin"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/sashabaranov/go-openai"
@@ -646,6 +647,37 @@ func (c *AIController) executeToolCalls(ctx *gin.Context, toolCalls []responseFu
 	return input
 }
 
+// pluginToolOwner returns the enabled AITool plugin that lists toolName, or
+// nil when no plugin does. Plugins serve their tool lists from a cache, so
+// this is cheap enough to call per tool call.
+func (c *AIController) pluginToolOwner(ctx context.Context, toolName string) plugin.AITool {
+	var owner plugin.AITool
+	_ = plugin.CallAITool(func(t plugin.AITool) error {
+		if owner != nil {
+			return nil
+		}
+		for _, tool := range t.Tools(ctx) {
+			if tool.Name == toolName {
+				owner = t
+				break
+			}
+		}
+		return nil
+	})
+	return owner
+}
+
+// callPluginTool routes a tool the controller does not know to the AITool
+// plugin that listed it. The plugin's error is returned as it is: the caller
+// hands it to the model as the tool result.
+func (c *AIController) callPluginTool(ctx context.Context, toolName string, arguments map[string]any) (string, error) {
+	owner := c.pluginToolOwner(ctx, toolName)
+	if owner == nil {
+		return "", fmt.Errorf("unknown tool: %s", toolName)
+	}
+	return owner.CallTool(ctx, toolName, arguments)
+}
+
 // sendErrorResponse send error response in stream
 func (c *AIController) sendErrorResponse(w http.ResponseWriter, id, model, errorMsg string) {
 	errorResponse := StreamResponse{
@@ -673,6 +705,16 @@ func (c *AIController) getMCPTools() []openai.ResponseTool {
 		openaiTool := c.convertMCPToolToOpenAI(mcpTool)
 		openaiTools = append(openaiTools, openaiTool)
 	}
+
+	// Tools served by AITool plugins ride along beside Answer's own. A plugin
+	// that lists nothing, because it is unconfigured or its source cannot be
+	// reached, adds nothing, and the model then works from Answer's content.
+	_ = plugin.CallAITool(func(t plugin.AITool) error {
+		for _, tool := range t.Tools(context.Background()) {
+			openaiTools = append(openaiTools, c.convertMCPToolToOpenAI(tool))
+		}
+		return nil
+	})
 
 	return openaiTools
 }
@@ -739,7 +781,7 @@ func (c *AIController) callMCPTool(ctx context.Context, toolName string, argumen
 	case "semantic_search":
 		result, err = c.mcpController.MCPSemanticSearchHandler()(ctx, request)
 	default:
-		return "", fmt.Errorf("unknown tool: %s", toolName)
+		return c.callPluginTool(ctx, toolName, arguments)
 	}
 
 	if err != nil {

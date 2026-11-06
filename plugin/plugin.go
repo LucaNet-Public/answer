@@ -134,6 +134,10 @@ func Register(p Base) {
 	if _, ok := p.(VectorSearch); ok {
 		registerVectorSearch(p.(VectorSearch))
 	}
+
+	if _, ok := p.(AITool); ok {
+		registerAITool(p.(AITool))
+	}
 }
 
 type Stack[T Base] struct {
