@@ -272,9 +272,7 @@ func (l *lockedResponseWriter) Flush() {
 func startStreamKeepalive(w http.ResponseWriter, interval time.Duration) (stop func()) {
 	done := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -285,7 +283,7 @@ func startStreamKeepalive(w http.ResponseWriter, interval time.Duration) (stop f
 				sendStreamKeepalive(w)
 			}
 		}
-	}()
+	})
 	return func() {
 		close(done)
 		wg.Wait()
