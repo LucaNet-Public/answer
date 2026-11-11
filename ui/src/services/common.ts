@@ -65,7 +65,7 @@ export const useQueryComments = (params) => {
     params.query_cond = '';
     delete params.comment_id;
   }
-  return useSWR<Type.ListResult>(
+  return useSWR<Type.ListResult<Type.CommentItem>>(
     `/answer/api/v1/comment/page?${qs.stringify(params, {
       skipNulls: true,
     })}`,

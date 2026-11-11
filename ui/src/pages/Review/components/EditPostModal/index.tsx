@@ -30,6 +30,7 @@ import { Editor, TagSelector, Mentions, TextArea } from '@/components';
 import {
   // matchedUsers,
   parseUserInfo,
+  getMentionUsernames,
   handleFormError,
   parseEditMentionUser,
   scrollToElementTop,
@@ -89,6 +90,7 @@ const Index: FC<Props> = ({
   const [formData, setFormData] = useState<FormDataItem>(initFormData);
   const [focusEditor, setFocusEditor] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [selectedUsernames, setSelectedUsernames] = useState<string[]>([]);
   const pageUsers = usePageUsers();
 
   const editCaptcha = useCaptchaPlugin('edit');
@@ -187,7 +189,10 @@ const Index: FC<Props> = ({
       const { value } = formData.content;
       // const users = matchedUsers(value);
       // const userNames = unionBy(users.map((user) => user.userName));
-      const commentMarkDown = parseUserInfo(value);
+      const commentMarkDown = parseUserInfo(parseEditMentionUser(value), [
+        ...getMentionUsernames(originalData.content),
+        ...selectedUsernames,
+      ]);
 
       // params.mention_username_list = userNames;
       params.content = commentMarkDown;
@@ -235,10 +240,13 @@ const Index: FC<Props> = ({
     editCaptcha.check(() => submitFlagReviewAction());
   };
 
-  const handleSelected = (val) => {
+  const handleSelected = (val, username: string) => {
     if (!loaded) {
       return;
     }
+    setSelectedUsernames((previous) =>
+      Array.from(new Set([...previous, username])),
+    );
     setFormData({
       ...formData,
       content: {
@@ -254,6 +262,7 @@ const Index: FC<Props> = ({
       return;
     }
 
+    setSelectedUsernames([]);
     formData.title.value = originalData.title;
     formData.content.value = originalData.content;
     formData.tags.value = originalData.tags.map((item) => {

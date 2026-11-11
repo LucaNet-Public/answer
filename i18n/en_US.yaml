@@ -1422,6 +1422,12 @@ ui:
     title: Linked
     description: Posts linked to
     no_linked_question: No contents linked from this content.
+  mentions:
+    label: People to mention
+    search_hint: Type a name to search people.
+    loading: Searching people…
+    empty: No people found.
+    error: Could not search people. Keep typing to try again.
   invite_to_answer:
     title: Invite People
     desc: Invite people you think can answer.

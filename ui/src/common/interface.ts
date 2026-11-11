@@ -94,6 +94,28 @@ export interface ListResult<T = any> {
   list: T[];
 }
 
+/** Comment list item returned by schema.GetCommentResp. */
+export interface CommentItem {
+  comment_id: string;
+  created_at: number;
+  object_id: string;
+  vote_count: number;
+  is_vote: boolean;
+  original_text: string;
+  parsed_text: string;
+  user_id: string;
+  username: string;
+  user_display_name: string;
+  user_avatar: string;
+  user_status: string;
+  reply_user_id: string;
+  reply_username: string;
+  reply_user_display_name: string;
+  reply_comment_id: string;
+  reply_user_status: string;
+  member_actions: MemberActionItem[];
+}
+
 export interface AnswerParams extends ImgCodeReq {
   content: string;
   html: string;

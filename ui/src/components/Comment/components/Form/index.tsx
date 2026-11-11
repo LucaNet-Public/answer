@@ -25,7 +25,7 @@ import classNames from 'classnames';
 
 import { TextArea, Mentions } from '@/components';
 import { usePageUsers, usePromptWithUnload } from '@/hooks';
-import { parseEditMentionUser } from '@/utils';
+import { parseEditMentionUser, getMentionUsernames } from '@/utils';
 
 const Index = ({
   className = '',
@@ -37,6 +37,7 @@ const Index = ({
 }) => {
   const [value, setValue] = useState('');
   const [immData, setImmData] = useState('');
+  const [selectedUsernames, setSelectedUsernames] = useState<string[]>([]);
   const pageUsers = usePageUsers();
   const { t } = useTranslation('translation', { keyPrefix: 'comment' });
   const [validationErrorMsg, setValidationErrorMsg] = useState('');
@@ -45,6 +46,7 @@ const Index = ({
     when: type === 'edit' ? immData !== value : Boolean(value),
   });
   useEffect(() => {
+    setSelectedUsernames([]);
     if (!initialValue) {
       return;
     }
@@ -55,11 +57,17 @@ const Index = ({
   const handleChange = (e) => {
     setValue(e.target.value);
   };
-  const handleSelected = (val) => {
+  const handleSelected = (val, username: string) => {
+    setSelectedUsernames((previous) =>
+      Array.from(new Set([...previous, username])),
+    );
     setValue(val);
   };
   const handleSendReply = () => {
-    onSendReply(value).catch((ex) => {
+    onSendReply(parseEditMentionUser(value), [
+      ...getMentionUsernames(initialValue),
+      ...selectedUsernames,
+    ]).catch((ex) => {
       if (ex.isError) {
         setValidationErrorMsg(ex.msg);
       }
