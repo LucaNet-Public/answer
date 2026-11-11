@@ -31,9 +31,13 @@ export const useQueryContributeUsers = () => {
   }>(apiUrl, request.instance.get);
 };
 
-export const userSearchByName = (name: string) => {
+export const userSearchByName = (
+  name: string,
+  options: { ignoreError?: '50X' } = {},
+) => {
   const apiUrl = '/answer/api/v1/user/info/search';
   return request.get<Type.UserInfoBase[]>(apiUrl, {
+    ...options,
     params: {
       username: name,
     },

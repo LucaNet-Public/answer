@@ -25,7 +25,7 @@ import { Link } from 'react-router-dom';
 import classNames from 'classnames';
 import unionBy from 'lodash/unionBy';
 
-import * as Types from '@/common/interface';
+import type * as Types from '@/common/interface';
 import { Modal } from '@/components';
 import { usePageUsers, useReportModal, useCaptchaModal } from '@/hooks';
 import {
@@ -47,6 +47,7 @@ import { commentReplyStore } from '@/stores';
 import Reactions from '@/pages/Questions/Detail/components/Reactions';
 
 import { Form, ActionBar, Reply } from './components';
+import { commentParticipants } from './participants';
 
 import './index.scss';
 
@@ -107,20 +108,7 @@ const Comment: FC<IProps> = ({ objectId, mode, commentId, children }) => {
     } else {
       setComments([...comments, ...data.list]);
     }
-    const user: Types.PageUser[] = [];
-    data.list.forEach((item) => {
-      user.push({
-        id: item.user_id,
-        displayName: item.user_display_name,
-        userName: item.username,
-      });
-      user.push({
-        id: item.reply_comment_id,
-        displayName: item.reply_user_display_name,
-        userName: item.username,
-      });
-    });
-    pageUsers.setUsers(user);
+    pageUsers.setUsers(commentParticipants(data.list));
   }, [data]);
 
   const handleReply = (id) => {
@@ -225,9 +213,9 @@ const Comment: FC<IProps> = ({ objectId, mode, commentId, children }) => {
   };
 
   const handleSendReply = (item) => {
-    const users = matchedUsers(item.value);
+    const users = matchedUsers(item.value, item.knownUsernames);
     const userNames = unionBy(users.map((user) => user.userName));
-    const commentMarkDown = parseUserInfo(item.value);
+    const commentMarkDown = parseUserInfo(item.value, item.knownUsernames);
 
     const params = {
       object_id: objectId,
@@ -410,8 +398,13 @@ const Comment: FC<IProps> = ({ objectId, mode, commentId, children }) => {
                   value={item.original_text}
                   type="edit"
                   mode={mode}
-                  onSendReply={(value) =>
-                    handleSendReply({ ...item, value, type: 'edit' })
+                  onSendReply={(value, knownUsernames) =>
+                    handleSendReply({
+                      ...item,
+                      value,
+                      knownUsernames,
+                      type: 'edit',
+                    })
                   }
                   onCancel={() => handleCancel(item.comment_id)}
                 />
@@ -441,8 +434,13 @@ const Comment: FC<IProps> = ({ objectId, mode, commentId, children }) => {
                 <Reply
                   userName={item.user_display_name}
                   mode={mode}
-                  onSendReply={(value) =>
-                    handleSendReply({ ...item, value, type: 'reply' })
+                  onSendReply={(value, knownUsernames) =>
+                    handleSendReply({
+                      ...item,
+                      value,
+                      knownUsernames,
+                      type: 'reply',
+                    })
                   }
                   onCancel={() => handleCancel(item.comment_id)}
                 />
@@ -504,7 +502,9 @@ const Comment: FC<IProps> = ({ objectId, mode, commentId, children }) => {
               comments.length <= 0 ? 'mt-3' : 'mt-2',
               comments.length <= 0 && 'bg-light p-3 rounded',
             )}
-            onSendReply={(value) => handleSendReply({ value, type: 'comment' })}
+            onSendReply={(value, knownUsernames) =>
+              handleSendReply({ value, knownUsernames, type: 'comment' })
+            }
             onCancel={() => setVisibleComment(!visibleComment)}
           />
         )}

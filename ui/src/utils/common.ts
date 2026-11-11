@@ -95,20 +95,30 @@ const bgFadeOut = (el) => {
  * @param markdown string
  * @returns Array<{displayName: string, userName: string}>
  */
-function matchedUsers(markdown) {
-  const globalReg = /\B@([\w|]+)/g;
-  const reg = /\B@([\w\\_\\.]+)/;
+// Plain-text mentions treat terminal punctuation as prose. A username chosen
+// from the picker (or recovered from a saved link) keeps its exact spelling.
+function mentionUsername(token: string, knownUsernames: string[]) {
+  const known = knownUsernames
+    .filter(
+      (name) =>
+        token.startsWith(name) && /^[.-]*$/.test(token.slice(name.length)),
+    )
+    .sort((a, b) => b.length - a.length)[0];
+  return known || token.replace(/[.-]+$/, '');
+}
 
-  const users = markdown.match(globalReg);
-  if (!users) {
-    return [];
-  }
-  return users.map((user) => {
-    const matched = user.match(reg);
-    return {
-      userName: matched[1],
-    };
-  });
+function getMentionUsernames(markdown: string): string[] {
+  const links = markdown.match(/\[@([\w.-]+)\]\(\/users\/\1\)/g) || [];
+  return links.map((link) => link.slice(2, link.indexOf(']')));
+}
+
+function matchedUsers(markdown, knownUsernames: string[] = []) {
+  const users = markdown.match(/\B@[\w.-]+/g) || [];
+  return users
+    .map((user) => ({
+      userName: mentionUsername(user.slice(1), knownUsernames),
+    }))
+    .filter((user) => user.userName);
 }
 
 /**
@@ -116,13 +126,16 @@ function matchedUsers(markdown) {
  * @param markdown string
  * @returns string
  */
-function parseUserInfo(markdown) {
-  const globalReg = /\B@([\w\\_\\.\\-]+)/g;
-  return markdown.replace(globalReg, '[@$1](/users/$1)');
+function parseUserInfo(markdown, knownUsernames: string[] = []) {
+  return markdown.replace(/\B@([\w.-]+)/g, (match, token) => {
+    const username = mentionUsername(token, knownUsernames);
+    if (!username) return match;
+    return `[@${username}](/users/${username})${token.slice(username.length)}`;
+  });
 }
 
 function parseEditMentionUser(markdown) {
-  const globalReg = /\[@([^\]]+)\]\([^)]+\)/g;
+  const globalReg = /\[@([\w.-]+)\]\(\/users\/\1\)/g;
   return markdown.replace(globalReg, '@$1');
 }
 
@@ -319,6 +332,7 @@ export {
   scrollToDocTop,
   bgFadeOut,
   matchedUsers,
+  getMentionUsernames,
   parseUserInfo,
   parseEditMentionUser,
   formatUptime,

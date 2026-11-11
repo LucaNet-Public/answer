@@ -28,6 +28,7 @@ import { usePageUsers, usePromptWithUnload } from '@/hooks';
 
 const Index = ({ userName, onSendReply, onCancel, mode }) => {
   const [value, setValue] = useState('');
+  const [selectedUsernames, setSelectedUsernames] = useState<string[]>([]);
   const pageUsers = usePageUsers();
   const { t } = useTranslation('translation', { keyPrefix: 'comment' });
   const [validationErrorMsg, setValidationErrorMsg] = useState('');
@@ -39,11 +40,14 @@ const Index = ({ userName, onSendReply, onCancel, mode }) => {
   const handleChange = (e) => {
     setValue(e.target.value);
   };
-  const handleSelected = (val) => {
+  const handleSelected = (val, username: string) => {
+    setSelectedUsernames((previous) =>
+      Array.from(new Set([...previous, username])),
+    );
     setValue(val);
   };
   const handleSendReply = () => {
-    onSendReply(value).catch((ex) => {
+    onSendReply(value, selectedUsernames).catch((ex) => {
       if (ex.isError) {
         setValidationErrorMsg(ex.msg);
       }
